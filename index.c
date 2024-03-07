@@ -24,6 +24,7 @@ enum Tokens {
     END,
     HASH,
     LABEL,
+    SEMI,
     INVALID_TOKEN
 };
 
@@ -47,6 +48,8 @@ bool isRegister(char *token);
 bool isImm5(char *imm5);
 bool isValidBranchCondition(char condition);
 bool isValidLabel(char *label, char labels[][MAX_LABEL_LEN], int count);
+bool isLabelDefinition(char *token);
+bool addLabel(char labels[][MAX_LABEL_LEN], int* labelCount, const char* tokenBuffer);
 bool isOffset6(char *offset);
 bool isValidTrapVector(char *offset);
 
@@ -63,6 +66,7 @@ bool parseST(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labe
 bool parseSTI(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount);
 bool parseSTR(char *source, int *minIndex);
 bool parseTRAP(char *source, int *minIndex);
+bool parseSEMI(char *source, int *minIndex);
 
 int main() 
 {
@@ -77,25 +81,35 @@ int main()
     bool firstToken = true;
     bool validStart = false;
 
+    char labels[MAX_LABELS][MAX_LABEL_LEN];
+    int labelCount = 0;
+
     while (fgets(line, sizeof(line), file))
     {
         int minIndex = 0;
         char tokenBuffer[256];
         int tokenIndex = 0;
-
-        char labels[MAX_LABELS][MAX_LABEL_LEN];
-        int labelCount = 0;
+        bool continueParsing = true; 
 
         enum Tokens tokenType = INVALID_TOKEN;
 
-        while (minIndex < strlen(line))
+        while (minIndex < strlen(line) && continueParsing)
         {
             char ch = peek(0, line, &minIndex);
-            if (ch == '\0' || ch == '\n' || ch == '\t' || ch == ' ')
+
+            if (ch == ';')
+            {
+                parseSEMI(line, &minIndex);
+                continueParsing = false;
+            }
+            else if (ch == '\0' || ch == '\n' || ch == '\t' || ch == ' ')
             {
                 if (tokenIndex > 0)
                 {
                     tokenBuffer[tokenIndex] = '\0';
+
+                    tokenType = validateToken(tokenBuffer);
+
                     if (firstToken && tokenBuffer[0] == '.')
                     {
                         tokenType = validateToken(tokenBuffer + 1);
@@ -111,152 +125,148 @@ int main()
                         }
                         firstToken = false;
                     }
-                    else 
+                    else if (firstToken && tokenType == INVALID_TOKEN)
                     {
-                        tokenType = validateToken(tokenBuffer);
-                        if (tokenType != INVALID_TOKEN)
+                        bool added = addLabel(labels, &labelCount, tokenBuffer);
+                        if (added)
                         {
-                            printf("Valid token: %s\n", tokenBuffer);
-
-                            if (tokenType == ADD)
-                            {
-                                if (!parseADD(line, &minIndex))
-                                {
-                                    printf("Invalid operands for ADD instruction.\n");
-                                }
-                                else 
-                                {
-                                    printf("Valid operands for ADD instruction.\n");
-                                }
-                            }
-                            else if (tokenType == AND)
-                            {
-                                if (!parseAND(line, &minIndex))
-                                {
-                                    printf("Invalid operands for AND instruction.\n");
-                                }
-                                else 
-                                {
-                                    printf("Valid operands for AND instruction.\n");
-                                }
-                            }
-                            else if (tokenType == LABEL)
-                            {
-                                if (labelCount < MAX_LABELS)
-                                {
-                                    strncpy(labels[labelCount], tokenBuffer, MAX_LABEL_LEN);
-                                    labels[labelCount][MAX_LABEL_LEN - 1] = '\0';
-                                    labelCount++;
-                                }
-                                else 
-                                {
-                                    // TODO conditional here
-                                }
-                            }
-                            else if (tokenType == BR)
-                            {
-                                if (!parseBR(line, &minIndex, labels, labelCount))
-                                {
-                                    printf("Invalid operands for BR instruction.\n");
-                                }
-                                else 
-                                {
-                                    printf("Valid operands for BR instruction.\n");
-                                }
-                            }
-                            else if (tokenType == LD)
-                            {
-                                if (!parseLD(line, &minIndex, labels, labelCount))
-                                {
-                                    printf("Invalid operands for LD instruction.\n");
-                                }
-                                else 
-                                {
-                                    printf("Valid operands for LD instruction.\n");
-                                }
-                            }
-                            else if (tokenType == LDI)
-                            {
-                                if (!parseLDI(line, &minIndex, labels, labelCount))
-                                {
-                                    printf("Invalid operands for LDI instruction.\n");
-                                }
-                                else 
-                                {
-                                    printf("Valid operands for LDI instruction.\n");
-                                }
-                            }
-                            else if (tokenType == LDR)
-                            {
-                                if (!parseLDR(line, &minIndex))
-                                {
-                                    printf("Invalid operands for LDR instruction.\n");
-                                }
-                                else 
-                                {
-                                    printf("Valid operands for LDR instruction.\n");
-                                }
-                            }
-                            else if (tokenType == LEA)
-                            {
-                                if (!parseLEA(line, &minIndex, labels, labelCount))
-                                {
-                                    printf("Invalid operands for LEA instruction.\n");
-                                }
-                                else 
-                                {
-                                    printf("Valid operands for LEA instruction.\n");
-                                }
-                            }
-                            else if (tokenType == NOT)
-                            {
-                                if (!parseNOT(line, &minIndex))
-                                {
-                                    printf("Invalid operands for NOT instruction.\n");
-                                }
-                                else 
-                                {
-                                    printf("Valid operands for NOT instruction.\n");
-                                }
-                            }
-                            else if (tokenType == ST)
-                            {
-                                if (!parseST(line, &minIndex, labels, labelCount))
-                                {
-                                    printf("Invalid operands for ST instruction.\n");
-                                }
-                                else 
-                                {
-                                    printf("Valid operands for ST instruction.\n");
-                                }
-                            }
-                            else if (tokenType == STI)
-                            {
-                                if (!parseST(line, &minIndex, labels, labelCount))
-                                {
-                                    printf("Invalid operands for STI instruction.\n");
-                                }
-                                else 
-                                {
-                                    printf("Valid operands for STI instruction.\n");
-                                }
-                            }
-                            else if (tokenType == STR)
-                            {
-                                if (!parseSTR(line, &minIndex))
-                                {
-                                    printf("Invalid operands for STR instruction.\n");
-                                }
-                                else 
-                                {
-                                    printf("Valid operands for STR instruction.\n");
-                                }
-                            }
+                            printf("Label defined: %s\n", tokenBuffer);
                         }
                         else 
                         {
-                            printf("Invalid token: %s\n", tokenBuffer);
+                            printf("Label addition failed (duplicate or limit reached): %s\n", tokenBuffer);
                         }
+                        firstToken = false;
+                    }
+                    else if (tokenType != INVALID_TOKEN)
+                    {
+                        printf("Valid token: %s\n", tokenBuffer);
+
+                        if (tokenType == ADD)
+                        {
+                            if (!parseADD(line, &minIndex))
+                            {
+                                printf("Invalid operands for ADD instruction.\n");
+                            }
+                            else 
+                            {
+                                printf("Valid operands for ADD instruction.\n");
+                            }
+                        }
+                        else if (tokenType == AND)
+                        {
+                            if (!parseAND(line, &minIndex))
+                            {
+                                printf("Invalid operands for AND instruction.\n");
+                            }
+                            else 
+                            {
+                                printf("Valid operands for AND instruction.\n");
+                            }
+                        }
+                        else if (tokenType == BR)
+                        {
+                            if (!parseBR(line, &minIndex, labels, labelCount))
+                            {
+                                printf("Invalid operands for BR instruction.\n");
+                            }
+                            else 
+                            {
+                                printf("Valid operands for BR instruction.\n");
+                            }
+                        }
+                        else if (tokenType == LD)
+                        {
+                            if (!parseLD(line, &minIndex, labels, labelCount))
+                            {
+                                printf("Invalid operands for LD instruction.\n");
+                            }
+                            else 
+                            {
+                                printf("Valid operands for LD instruction.\n");
+                            }
+                        }
+                        else if (tokenType == LDI)
+                        {
+                            if (!parseLDI(line, &minIndex, labels, labelCount))
+                            {
+                                printf("Invalid operands for LDI instruction.\n");
+                            }
+                            else 
+                            {
+                                printf("Valid operands for LDI instruction.\n");
+                            }
+                        }
+                        else if (tokenType == LDR)
+                        {
+                            if (!parseLDR(line, &minIndex))
+                            {
+                                printf("Invalid operands for LDR instruction.\n");
+                            }
+                            else 
+                            {
+                                printf("Valid operands for LDR instruction.\n");
+                            }
+                        }
+                        else if (tokenType == LEA)
+                        {
+                            if (!parseLEA(line, &minIndex, labels, labelCount))
+                            {
+                                printf("Invalid operands for LEA instruction.\n");
+                            }
+                            else 
+                            {
+                                printf("Valid operands for LEA instruction.\n");
+                            }
+                        }
+                        else if (tokenType == NOT)
+                        {
+                            if (!parseNOT(line, &minIndex))
+                            {
+                                printf("Invalid operands for NOT instruction.\n");
+                            }
+                            else 
+                            {
+                                printf("Valid operands for NOT instruction.\n");
+                            }
+                        }
+                        else if (tokenType == ST)
+                        {
+                            if (!parseST(line, &minIndex, labels, labelCount))
+                            {
+                                printf("Invalid operands for ST instruction.\n");
+                            }
+                            else 
+                            {
+                                printf("Valid operands for ST instruction.\n");
+                            }
+                        }
+                        else if (tokenType == STI)
+                        {
+                            if (!parseST(line, &minIndex, labels, labelCount))
+                            {
+                                printf("Invalid operands for STI instruction.\n");
+                            }
+                            else 
+                            {
+                                printf("Valid operands for STI instruction.\n");
+                            }
+                        }
+                        else if (tokenType == STR)
+                        {
+                            if (!parseSTR(line, &minIndex))
+                            {
+                                printf("Invalid operands for STR instruction.\n");
+                            }
+                            else 
+                            {
+                                printf("Valid operands for STR instruction.\n");
+                            }
+                        }
+                    }
+                    else 
+                    {
+                        printf("Invalid token or unrecognized label: %s\n", tokenBuffer);
                     }
                     tokenIndex = 0;
                 }
@@ -365,6 +375,10 @@ enum Tokens validateToken(const char *token)
     {
         return HASH;
     }
+    else if (strcmp(token, ";") == 0)
+    {
+        return SEMI;
+    }
     else 
     {
         return INVALID_TOKEN;
@@ -422,7 +436,12 @@ bool isRegister(char *token)
 
 bool isImm5(char *imm5)
 {
-    int val = atoi(imm5);
+    if (imm5[0] != '#')
+    {
+        return false;
+    }
+
+    int val = atoi(imm5 + 1);
     if (val >= -16 && val <= 15)
     {
         return true;
@@ -440,43 +459,56 @@ bool isImm5(char *imm5)
     else
         Invalid
 */
-bool parseADD(char *source, int *minIndex)
+bool parseADD(char *source, int *minIndex) 
 {
     int tokenCount;
-    for (tokenCount = 0; tokenCount < 3; tokenCount++)
+    for (tokenCount = 0; tokenCount < 3; tokenCount++) 
     {
-        while (isspace(peek(0, source, minIndex)))
+        // Skip any leading whitespace
+        while (isspace(peek(0, source, minIndex))) 
         {
             consume(source, minIndex);
         }
 
         char tokenBuffer[256];
-        int tokenIndex = 0;
-        while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != ',' && peek(0, source, minIndex) != '\0')
+        int tokenIndex = 0; // Initialize tokenIndex to 0
+        while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != ',' && peek(0, source, minIndex) != '\0') 
         {
-            tokenIndex++;
             tokenBuffer[tokenIndex] = consume(source, minIndex);
+            tokenIndex++;
         }
-        tokenBuffer[tokenIndex] = '\0';
+        tokenBuffer[tokenIndex] = '\0'; // Null-terminate the token
 
-        if (tokenCount < 2)
+        // Validate operands: the first two must be registers, and the third can be a register or an immediate value
+        if (tokenCount < 2) 
         {
-            if (!isRegister(tokenBuffer))
+            // For the first two operands, check if they are valid registers
+            if (!isRegister(tokenBuffer)) 
             {
                 return false;
             }
-        }
+        } 
         else 
         {
-            if (!isRegister(tokenBuffer) && !isImm5(tokenBuffer))
+            // For the third operand, it can be either a register or an immediate value
+            if (!(isRegister(tokenBuffer) || isImm5(tokenBuffer))) 
             {
                 return false;
             }
         }
 
-        if (tokenCount < 2 && consume(source, minIndex) != ',')
+        // After the first two operands, expect a comma before the next operand
+        if (tokenCount < 2) 
         {
-            return false;
+            while (isspace(peek(0, source, minIndex))) consume(source, minIndex); // Consume spaces before checking for a comma
+            if (peek(0, source, minIndex) != ',') 
+            {
+                return false;
+            } 
+            else 
+            {
+                consume(source, minIndex); // Consume the comma
+            }
         }
     }
 
@@ -493,43 +525,46 @@ bool parseADD(char *source, int *minIndex)
     else
         Invalid
 */
-bool parseAND(char *source, int *minIndex)
+bool parseAND(char *source, int *minIndex) 
 {
     int tokenCount;
-    for (tokenCount = 0; tokenCount < 3; tokenCount++)
+    for (tokenCount = 0; tokenCount < 3; tokenCount++) 
     {
-        while (isspace(peek(0, source, minIndex)))
+        while (isspace(peek(0, source, minIndex))) 
         {
             consume(source, minIndex);
         }
 
         char tokenBuffer[256];
-        int tokenIndex = 0;
-        while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != ',' && peek(0, source, minIndex) != '\0')
+        int tokenIndex = 0; // Start at index 0
+        while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != ',' && peek(0, source, minIndex) != '\0') 
         {
+            tokenBuffer[tokenIndex] = consume(source, minIndex); // Assign before increment
             tokenIndex++;
-            tokenBuffer[tokenIndex] = consume(source, minIndex);
         }
-        tokenBuffer[tokenIndex] = '\0'; 
+        tokenBuffer[tokenIndex] = '\0';
 
-        if (tokenCount < 2)
+        // For the first two tokens, check if they are valid registers
+        if (tokenCount < 2) 
         {
-            if (!isRegister(tokenBuffer))
+            if (!isRegister(tokenBuffer)) 
             {
                 return false;
             }
-        }
+        } 
         else 
         {
-            if (!isRegister(tokenBuffer) && !isImm5(tokenBuffer))
+            // For the third token, it can be a register or an immediate value
+            if (!(isRegister(tokenBuffer) || isImm5(tokenBuffer))) 
             {
                 return false;
             }
         }
 
-        if (tokenCount < 2 && consume(source, minIndex) != ',')
+        // Consume a comma after the first two tokens if there are more tokens to read
+        if (tokenCount < 2 && peek(0, source, minIndex) == ',') 
         {
-            return false;
+            consume(source, minIndex);
         }
     }
 
@@ -556,6 +591,39 @@ bool isValidLabel(char *label, char labels[][MAX_LABEL_LEN], int count)
         }
     }
     return false;
+}
+
+bool isLabelDefinition(char *token)
+{
+    if (validateToken(token) == INVALID_TOKEN)
+    {
+        return true;
+    }
+    return false;
+}
+
+bool addLabel(char labels[][MAX_LABEL_LEN], int* labelCount, const char* tokenBuffer)
+{
+    int i;
+    for (i = 0; i < *labelCount; i++)
+    {
+        if (strcmp(labels[i], tokenBuffer) == 0)
+        {
+            return false;
+        }
+    }
+
+    if (*labelCount < MAX_LABELS)
+    {
+        strncpy(labels[*labelCount], tokenBuffer, MAX_LABEL_LEN);
+        labels[*labelCount][MAX_LABEL_LEN - 1] = '\0';
+        (*labelCount)++;
+        return true;
+    }
+    else 
+    {
+        return false;
+    }
 }
 
 /* 
@@ -648,48 +716,47 @@ bool parseBR(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labe
     else
         Invalid
 */
-bool parseLD(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount)
+bool parseLD(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount) 
 {
-    while (isspace(peek(0, source, minIndex)))
+    // Skip whitespace before DR
+    while (isspace(peek(0, source, minIndex))) 
     {
         consume(source, minIndex);
     }
 
     char tokenBuffer[256];
     int tokenIndex = 0;
-    while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != ',' && peek(0, source, minIndex) != '\0')
+    // Parse DR
+    while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != ',' && peek(0, source, minIndex) != '\0') 
     {
-        tokenIndex++;
         tokenBuffer[tokenIndex] = consume(source, minIndex);
+        tokenIndex++;
     }
-    tokenBuffer[tokenIndex] = '\0';
+    tokenBuffer[tokenIndex] = '\0'; 
 
-    if (!isRegister(tokenBuffer))
+    if (!isRegister(tokenBuffer)) 
     {
         return false;
     }
 
-    while (isspace(peek(0, source, minIndex)))
+    // Skip whitespace (and comma if present) before the label
+    while (isspace(peek(0, source, minIndex)) || peek(0, source, minIndex) == ',') 
     {
         consume(source, minIndex);
     }
 
+    // Reset for label parsing
     tokenIndex = 0;
-    while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != '\0')
+    // Parse LABEL
+    while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != '\0') 
     {
-        tokenIndex++;
         tokenBuffer[tokenIndex] = consume(source, minIndex);
+        tokenIndex++;
     }
     tokenBuffer[tokenIndex] = '\0';
 
-    if (isValidLabel(tokenBuffer, labels, labelCount))
-    {
-        return true;
-    }
-    else 
-    {
-        return false;
-    }
+    // Check if label is valid
+    return isValidLabel(tokenBuffer, labels, labelCount);
 }
 
 /* 
@@ -1114,4 +1181,17 @@ bool parseTRAP(char *source, int *minIndex)
     }
 }
 
-// NEED to check in imm5 that # is placed before
+bool parseSEMI(char *source, int *minIndex)
+{
+    if (peek(0, source, minIndex) != ';')
+    {
+        return true;
+    }
+
+    while (peek(0, source, minIndex) != '\n' && peek(0, source, minIndex) != '\0')
+    {
+        consume(source, minIndex);
+    }
+
+    return true;
+}
