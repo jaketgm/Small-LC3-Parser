@@ -1,0 +1,10 @@
+{
+    "files.associations": {
+        "istream": "c",
+        "*.tcc": "c",
+        "validations.h": "c",
+        "parsing.h": "c",
+        "string.h": "c",
+        "stdbool.h": "c"
+    }
+}

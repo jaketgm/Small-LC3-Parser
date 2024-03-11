@@ -11,13 +11,13 @@
             STI R2, VAL
             ST R3, STORLOC
 
-LOOPADD
+LOOPADD:
             ADD R3, R3, R1 ; Add: R3+R1->R3
             ADD R2, R2, #-1 ; Decrement counter
             BRp LOOPADD ; Loop if positive
             TRAP x22
 
-HALT
+HALT:
         .BLKW 254 ; (254 because x3100 - x3001 (LD command for R1) - 1 (To account for PC) = 254 in decimal)
 NUMX    .FILL #11 ; x=11
 DATA    .FILL #6

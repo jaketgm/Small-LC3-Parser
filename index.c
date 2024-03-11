@@ -125,11 +125,17 @@ RegisterMap registerMap[] = {
     {INVALID_REGISTER, "NULL"},
 };
 
+typedef struct {
+    char label[MAX_LABEL_LEN];
+    int lineNum;
+} LabelInfo;
+
 char peek(int offset, char *source, int *minIndex);
 char consume(char *source, int *minIndex);
 Tokens validateToken(const char *token);
 RegisterTokens validateRegisterToken(const char *regstr);
 bool isRegister(char *token);
+bool isSoloLabel(const char* token);
 bool isImm5(char *imm5);
 bool isValidBranchCondition(char condition);
 bool isValidLabel(char *label, char labels[][MAX_LABEL_LEN], int count);
@@ -162,10 +168,15 @@ const char *getOpcodeForToken(BinOps binaryOps);
 const char *getBinValForRegister(RegisterTokens regTok);
 const char *getCommentForInstruction(BinOps binaryOps);
 BinOps tokenToBinaryOp(Tokens token, const char *operands);
-void processOperands(const char *operandsBuffer, char *binaryOut, Tokens tokenType);
+void processOperands(const char *operandsBuffer, char *binaryOut, Tokens tokenType, LabelInfo labelInfos[], int labelCount, int currentLine);
 void immToBinary(const char *immStr, char *binaryOut, int immediateSize);
 void writeLineToBin(const char *opcode, const char *binaryOut, const char *comment, FILE *binFile); 
 void hexToBinary(unsigned int hex, char *binary, int bits);
+void convertLineNumToBin(int lineNum, char *binaryRepresentation, int bits);
+
+#include "utilities.h"
+#include "validations.h"
+#include "parsing.h"
 
 int main() 
 {
@@ -190,49 +201,57 @@ int main()
     char labels[MAX_LABELS][MAX_LABEL_LEN];
     int labelCount = 0;
 
+    LabelInfo labelInfos[MAX_LABELS];
+    int lineNum = 0;
+    LabelInfo dummyLabels[1];
+    char label[MAX_LABEL_LEN];
+    int labelLines[MAX_LABELS];
+    int dummyLabelCount = 0;
+    bool isLabel;
+
     while (fgets(line, sizeof(line), file)) 
     {
-        char* token = strtok(line, " \t\n"); // Tokenize the line
-
-        while (token != NULL) 
+        // Ignore lines that are empty or start with a comment
+        if (line[0] == ';' || line[0] == '\n' || line[0] == '\r' || line[0] == '\0') 
         {
-            // Check if the token starts with "BR" and contains condition codes
-            if (strncmp(token, "BR", 2) == 0 && strlen(token) > 2) 
-            {
-                // Extract the condition code (n, z, p) from BR
-                char conditionCode = token[2];
-
-                // The next token should be the label after "BRn/z/p"
-                token = strtok(NULL, " \t\n");
-            }
-
-            // Now 'token' should be a label or another instruction
-            if (token != NULL && validateToken(token) == INVALID_TOKEN) 
-            {
-                // Check if it's a label and not previously added
-                bool isLabelAlreadyAdded = false;
-                int i;
-                for (i = 0; i < labelCount; i++) 
-                {
-                    if (strcmp(labels[i], token) == 0) 
-                    {
-                        isLabelAlreadyAdded = true;
-                        break;
-                    }
-                }
-
-                if (!isLabelAlreadyAdded) 
-                {
-                    // Add the label to the labels array
-                    strncpy(labels[labelCount], token, MAX_LABEL_LEN - 1);
-                    labels[labelCount][MAX_LABEL_LEN - 1] = '\0'; // Ensure null termination
-                    labelCount++;
-                }
-            }
-
-            // Move to the next token
-            token = strtok(NULL, " \t\n");
+            lineNum++;
+            continue;
         }
+
+        char* token = strtok(line, " \t\n");
+        bool isLabelLine = false;
+
+        // Check if the first token is a potential label
+        if (token && validateToken(token) == INVALID_TOKEN) 
+        {
+            // Check the next token to ensure this isn't just an unknown instruction
+            char *nextToken = strtok(NULL, " \t\n");
+            if (nextToken && validateToken(nextToken) != INVALID_TOKEN) 
+            {
+                isLabelLine = true;
+            }
+            else if (isSoloLabel(token)) 
+            {
+                isLabelLine = true;
+            }
+        }
+
+        // If we found a label, store it with its line number
+        if (isLabelLine) 
+        {
+            strncpy(labels[labelCount], token, MAX_LABEL_LEN - 1);
+            labels[labelCount][MAX_LABEL_LEN - 1] = '\0'; // Ensure null-termination
+            labelLines[labelCount] = lineNum;
+            labelCount++;
+        }
+
+        lineNum++;
+    }
+
+    printf("Total Labels: %d\n", labelCount);
+    for (int i = 0; i < labelCount; i++) 
+    {
+        printf("Label: %s, Line Number: %d\n", labels[i], labelLines[i] + 1);
     }
     
     rewind(file);
@@ -353,29 +372,58 @@ int main()
                 tokenBuffer[tokenIndex] = '\0';
                 tokenIndex = 0;
 
-                if (strncmp(tokenBuffer, "BR", 2) == 0 && strlen(tokenBuffer) > 2) 
-                {
-                    // Prepare a buffer to hold the label part after "BR" instruction, excluding comments
-                    char labelPart[256] = {0}; // Initialize the buffer to store the label
+                // if (strncmp(tokenBuffer, "BR", 2) == 0 && strlen(tokenBuffer) > 2) 
+                // {
+                //     // Prepare a buffer to hold the label part after "BR" instruction, excluding comments
+                //     char labelPart[256] = {0}; // Initialize the buffer to store the label
 
-                    // Extract the label part from the rest of the line, ignoring comments
-                    char *commentStart = strchr(line + minIndex, ';'); // Find the start of a comment
-                    if (commentStart != NULL) 
-                    {
-                        *commentStart = '\0'; // Terminate the line at the start of the comment to exclude it
-                    }
+                //     // Extract the label part from the rest of the line, ignoring comments
+                //     char *commentStart = strchr(line + minIndex, ';'); // Find the start of a comment
+                //     if (commentStart != NULL) 
+                //     {
+                //         *commentStart = '\0'; // Terminate the line at the start of the comment to exclude it
+                //     }
 
-                    // Copy the label part, excluding any leading whitespace
-                    sscanf(line + minIndex, "%s", labelPart); // This will skip leading whitespace and stop at the first whitespace after the label
+                //     // Copy the label part, excluding any leading whitespace
+                //     sscanf(line + minIndex, "%s", labelPart); // This will skip leading whitespace and stop at the first whitespace after the label
 
-                    // Validate the extracted label part
-                    if (isValidLabel(labelPart, labels, labelCount)) 
-                    {
-                        printf("Valid BR instruction with label: %s\n", labelPart);
-                    } 
-                    else 
-                    {
-                        printf("Invalid BR instruction or label not found: %s\n", labelPart);
+                //     // Validate the extracted label part
+                //     if (isValidLabel(labelPart, labels, labelCount)) 
+                //     {
+                //         printf("Valid BR instruction with label: %s\n", labelPart);
+                //     } 
+                //     else 
+                //     {
+                //         printf("Invalid BR instruction or label not found: %s\n", labelPart);
+                //     }
+                // }
+                if (strncmp(tokenBuffer, "BR", 2) == 0) {
+                    // Extract condition codes and label from the rest of the line
+                    char conditionCodes[4] = {0}; // Assuming up to 3 condition codes
+                    strncpy(conditionCodes, tokenBuffer + 2, 3); // Copy any condition codes
+
+                    // Assuming label starts immediately after condition codes with no extra spaces
+                    char *labelStart = line + minIndex; // Start of the label in the line buffer
+
+                    // Trim leading spaces before label if needed
+                    while (*labelStart && isspace(*labelStart)) labelStart++;
+
+                    // Ensure label termination at the first space or end of string
+                    char *endOfLabel = strpbrk(labelStart, " \t\n\r;");
+                    if (endOfLabel) *endOfLabel = '\0';
+
+                    // Now labelStart points to the start of the label.
+                    if (isValidLabel(labelStart, labels, labelCount)) {
+                        printf("Valid BR instruction with label: %s\n", labelStart);
+                        char operandsBuffer[260]; // Enough space for conditions and label.
+                        sprintf(operandsBuffer, "%s %s", conditionCodes, labelStart); // Prepare operand string.
+                        
+                        char binaryOut[17]; // Buffer for binary output.
+                        processOperands(operandsBuffer, binaryOut, BR, labelInfos, labelCount, lineNum);
+                        
+                        writeLineToBin("0000", binaryOut, "", binFile); // Write to binary file.
+                    } else {
+                        printf("Invalid BR instruction or label not found: %s\n", labelStart);
                     }
                 }
                 else 
@@ -410,7 +458,7 @@ int main()
                             const char *comment = getCommentForInstruction(binaryAdd);
                             printf("Opcode for ADD: %s\n", opcode);
                             printf("Operands: %s\n", operandsBuffer);
-                            processOperands(operandsBuffer, binaryOut, ADD);
+                            processOperands(operandsBuffer, binaryOut, ADD, dummyLabels, dummyLabelCount, lineNum);
                             printf("Binary operands for ADD: %s\n", binaryOut);
                             printf("Comment for ADD: %s\n", comment);
 
@@ -433,7 +481,7 @@ int main()
                             const char *comment = getCommentForInstruction(binaryAnd);
                             printf("Opcode for AND: %s\n", opcode);
                             printf("Operands: %s\n", operandsBuffer);
-                            processOperands(operandsBuffer, binaryOut, AND);
+                            processOperands(operandsBuffer, binaryOut, AND, dummyLabels, dummyLabelCount, lineNum);
                             printf("Binary operands for AND: %s\n", binaryOut);
                             printf("Comment for AND: %s\n", comment);
 
@@ -505,7 +553,7 @@ int main()
                             const char *comment = getCommentForInstruction(binaryLdr);
                             printf("Opcode for LDR: %s\n", opcode);
                             printf("Operands: %s\n", operandsBuffer);
-                            processOperands(operandsBuffer, binaryOut, LDR);
+                            processOperands(operandsBuffer, binaryOut, LDR, dummyLabels, dummyLabelCount, lineNum);
                             printf("Binary operands for LDR: %s\n", binaryOut);
                             printf("Comment for ADD: %s\n", comment);
 
@@ -543,7 +591,7 @@ int main()
                             const char *comment = getCommentForInstruction(binaryNot);
                             printf("Opcode for NOT: %s\n", opcode);
                             printf("Operands: %s\n", operandsBuffer);
-                            processOperands(operandsBuffer, binaryOut, NOT); 
+                            processOperands(operandsBuffer, binaryOut, NOT, dummyLabels, dummyLabelCount, lineNum); 
                             printf("Binary operands for NOT: %s\n", binaryOut);
                             printf("Comment for NOT: %s\n", comment);
 
@@ -596,7 +644,7 @@ int main()
                             const char *comment = getCommentForInstruction(binaryStr);
                             printf("Opcode for STR: %s\n", opcode);
                             printf("Operands: %s\n", operandsBuffer);
-                            processOperands(operandsBuffer, binaryOut, STR);
+                            processOperands(operandsBuffer, binaryOut, STR, dummyLabels, dummyLabelCount, lineNum);
                             printf("Binary operands for STR: %s\n", binaryOut);
                             printf("Comment for ADD: %s\n", comment);
 
@@ -630,6 +678,7 @@ int main()
                 }
             }
         }
+        lineNum++;
     }
 
     fclose(file);
@@ -637,1441 +686,4 @@ int main()
     printf("Successfully converted the LC-3 ASM file to binary!");
 
     return 0;
-}
-
-char peek(int offset, char *source, int *minIndex) 
-{
-    int length = strlen(source);
-    if (*minIndex + offset >= length) 
-    {
-        return '\0';
-    }
-    return source[*minIndex + offset];
-}
-
-char consume(char *source, int *minIndex) 
-{
-    char ch = source[(*minIndex)++];
-    if (ch == '\n') 
-    {
-        printf("\nConsumed newline at index: %d, incrementing line count\n", *minIndex - 1);
-    } 
-    else 
-    {
-        printf("Consumed char: %c, at index: %d\n", ch, *minIndex - 1);
-    }
-    return ch;
-}
-
-Tokens validateToken(const char *token) 
-{
-    if (strcmp(token, "ADD") == 0)
-    {
-        return ADD;
-    }
-    else if (strcmp(token, "AND") == 0)
-    {
-        return AND;
-    }
-    else if (strncmp(token, "BR", 2) == 0 && strlen(token) == 2) 
-    {
-        return BR;
-    }
-    else if (strcmp(token, "LD") == 0)
-    {
-        return LD;
-    }
-    else if (strcmp(token, "LDI") == 0)
-    {
-        return LDI;
-    }
-    else if (strcmp(token, "LDR") == 0)
-    {
-        return LDR;
-    }
-    else if (strcmp(token, "LEA") == 0)
-    {
-        return LEA;
-    }
-    else if (strcmp(token, "NOT") == 0)
-    {
-        return NOT;
-    }
-    else if (strcmp(token, "ST") == 0)
-    {
-        return ST;
-    }
-    else if (strcmp(token, "STI") == 0)
-    {
-        return STI;
-    }
-    else if (strcmp(token, "STR") == 0)
-    {
-        return STR;
-    }
-    else if (strcmp(token, "TRAP") == 0)
-    {
-        return TRAP;
-    }
-    else if (strcmp(token, "ORIG") == 0)
-    {
-        return ORIG;
-    }
-    else if (strcmp(token, "END") == 0)
-    {
-        return END;
-    }
-    else if (strcmp(token, "#") == 0)
-    {
-        return HASH;
-    }
-    else if (strcmp(token, ";") == 0)
-    {
-        return SEMI;
-    }
-    else if (strcmp(token, "BLKW") == 0)
-    {
-        return BLKW;
-    }
-    else if (strcmp(token, ".FILL") == 0)
-    {
-        return FILL;
-    }
-    else 
-    {
-        return INVALID_TOKEN;
-    }
-}
-
-RegisterTokens validateRegisterToken(const char *regstr)
-{
-    if (strcmp(regstr, "R0") == 0)
-    {
-        return R0;
-    }
-    else if (strcmp(regstr, "R1") == 0)
-    {
-        return R1;
-    }
-    else if (strcmp(regstr, "R2") == 0)
-    {
-        return R2;
-    }
-    else if (strcmp(regstr, "R3") == 0)
-    {
-        return R3;
-    }
-    else if (strcmp(regstr, "R4") == 0)
-    {
-        return R4;
-    }
-    else if (strcmp(regstr, "R5") == 0)
-    {
-        return R5;
-    }
-    else if (strcmp(regstr, "R6") == 0)
-    {
-        return R6;
-    }
-    else if (strcmp(regstr, "R7") == 0)
-    {
-        return R7;
-    }
-    else
-    {
-        return INVALID_REGISTER;
-    }
-}
-
-BinOps tokenToBinaryOp(Tokens token, const char *operands) 
-{
-    switch (token) 
-    {
-        case ADD:
-            if (strstr(operands, "#") != NULL)
-            {
-                return ADD_TWO_OP;
-            }
-            else 
-            {
-                return ADD_ONE_OP;
-            }
-            break;
-        case AND:
-            if (strstr(operands, "#") != NULL)
-            {
-                return AND_TWO_OP;
-            }
-            else 
-            {
-                return AND_ONE_OP;
-            }
-            break;
-        case BR: 
-            return BR_OP;
-        case LD: 
-            return LD_OP;
-        case LDI: 
-            return LDI_OP;
-        case LDR: 
-            return LDR_OP;
-        case LEA: 
-            return LEA_OP;
-        case NOT: 
-            return NOT_OP;
-        case ST: 
-            return ST_OP;
-        case STI: 
-            return STI_OP;
-        case STR: 
-            return STR_OP;
-        case TRAP: 
-            return TRAP_OP;
-        default: 
-            return INVALID_OP;
-    }
-}
-
-bool parseORIG(char *source, int *minIndex, unsigned int *address)
-{
-    char *endPtr;
-
-    while (isspace(source[*minIndex])) (*minIndex)++;
-    if (source[*minIndex] != 'x' && source[*minIndex] != 'X') return false; // Ensure it starts with 'x'
-    (*minIndex)++; // Skip 'x'
-
-    // Convert the hexadecimal string to an unsigned int
-    *address = strtoul(source + *minIndex, &endPtr, 16);
-
-    *minIndex += (endPtr - (source + *minIndex));
-
-    // If endPtr is not at a whitespace or end of string, parsing failed
-    if (*endPtr != '\0' && !isspace(*endPtr)) 
-    {
-        return false; // Failed
-    }
-
-    return true; // Success
-}
-
-bool isRegister(char *token)
-{
-    if (validateRegisterToken(token) != INVALID_REGISTER)
-    {
-        return true;
-    }
-    return false;
-}
-
-bool isImm5(char *imm5) 
-{
-    if (imm5[0] != '#') 
-    {
-        return false;
-    }
-
-    int val = atoi(imm5 + 1);
-    if (val >= -32768 && val <= 32767) 
-    {
-        return true;
-    }
-    return false;
-}
-
-/* 
-    ADD -> Validate
-    if 
-        3 parameters connected via ','
-        cases:
-            DR, SR1, SR2
-            DR, SR1, Imm5
-    else
-        Invalid
-*/
-bool parseADD(char *source, int *minIndex, char *operandsOut) 
-{
-    int tokenCount;
-    char operands[256] = "";
-    
-    for (tokenCount = 0; tokenCount < 3; tokenCount++) 
-    {
-        // Skip any leading whitespace
-        while (isspace(peek(0, source, minIndex))) 
-        {
-            consume(source, minIndex);
-        }
-
-        char tokenBuffer[256];
-        int tokenIndex = 0; // Initialize tokenIndex to 0
-        while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != ',' && peek(0, source, minIndex) != '\0') 
-        {
-            tokenBuffer[tokenIndex] = consume(source, minIndex);
-            tokenIndex++;
-        }
-        tokenBuffer[tokenIndex] = '\0';
-
-        // Validate operands: the first two must be registers, and the third can be a register or an immediate value
-        if (tokenCount < 2) 
-        {
-            // For the first two operands, check if they are valid registers
-            if (!isRegister(tokenBuffer)) 
-            {
-                return false;
-            }
-        } 
-        else 
-        {
-            // For the third operand, it can be either a register or an immediate value
-            if (!(isRegister(tokenBuffer) || isImm5(tokenBuffer))) 
-            {
-                return false;
-            }
-        }
-
-        if (tokenCount > 0) 
-        {
-            strcat(operands, ","); // Separate operands with commas
-        }
-        strcat(operands, tokenBuffer);
-
-        // After the first two operands, expect a comma before the next operand
-        if (tokenCount < 2) 
-        {
-            while (isspace(peek(0, source, minIndex))) consume(source, minIndex); // Consume spaces before checking for a comma
-            if (peek(0, source, minIndex) != ',') 
-            {
-                return false;
-            } 
-            else 
-            {
-                consume(source, minIndex); // Consume the comma
-            }
-        }
-    }
-
-    strcpy(operandsOut, operands);
-    return true;
-}
-
-/* 
-    ADD -> Validate
-    if 
-        3 parameters connected via ','
-        cases:
-            DR, SR1, SR2
-            DR, SR1, Imm5
-    else
-        Invalid
-*/
-bool parseAND(char *source, int *minIndex, char *operandsOut) 
-{
-    int tokenCount;
-    char operands[256] = "";
-
-    for (tokenCount = 0; tokenCount < 3; tokenCount++) 
-    {
-        while (isspace(peek(0, source, minIndex))) 
-        {
-            consume(source, minIndex);
-        }
-
-        char tokenBuffer[256];
-        int tokenIndex = 0; // Start at index 0
-        while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != ',' && peek(0, source, minIndex) != '\0') 
-        {
-            tokenBuffer[tokenIndex] = consume(source, minIndex); // Assign before increment
-            tokenIndex++;
-        }
-        tokenBuffer[tokenIndex] = '\0';
-
-        // For the first two tokens, check if they are valid registers
-        if (tokenCount < 2) 
-        {
-            if (!isRegister(tokenBuffer)) 
-            {
-                return false;
-            }
-        } 
-        else 
-        {
-            // For the third token, it can be a register or an immediate value
-            if (!(isRegister(tokenBuffer) || isImm5(tokenBuffer))) 
-            {
-                return false;
-            }
-        }
-
-        if (tokenCount > 0) 
-        {
-            strcat(operands, ","); // Separate operands with commas
-        }
-        strcat(operands, tokenBuffer);
-
-        // Consume a comma after the first two tokens if there are more tokens to read
-        if (tokenCount < 2 && peek(0, source, minIndex) == ',') 
-        {
-            consume(source, minIndex);
-        }
-    }
-
-    strcpy(operandsOut, operands);
-    return true;
-}
-
-bool isValidBranchCondition(char condition)
-{
-    if (condition == 'n' || condition == 'z' || condition == 'p')
-    {
-        return true;
-    }
-    return false;
-}
-
-bool isValidLabel(char *label, char labels[][MAX_LABEL_LEN], int count) 
-{
-    printf("Validating label: %s\n", label);
-    int i;
-    for (i = 0; i < count; i++) 
-    {
-        if (strcmp(label, labels[i]) == 0) 
-        {
-            printf("Label found and valid: %s\n", label);
-            return true;
-        }
-    }
-    printf("Label not found: %s\n", label);
-    return false;
-}
-
-bool isLabelDefinition(char *token)
-{
-    if (validateToken(token) == INVALID_TOKEN)
-    {
-        return true;
-    }
-    return false;
-}
-
-bool addLabel(char labels[][MAX_LABEL_LEN], int* labelCount, const char* tokenBuffer) 
-{
-    // Check if the label already exists
-    int i;
-    for(i = 0; i < *labelCount; i++) 
-    {
-        if(strcmp(labels[i], tokenBuffer) == 0) 
-        {
-            return false; // Label already exists
-        }
-    }
-    // Add the new label
-    strcpy(labels[*labelCount], tokenBuffer);
-    (*labelCount)++;
-    return true;
-}
-
-/* 
-    BR -> Validate
-    if 
-        3 possible parameters (At least one, at most 3)
-        params:
-            n => negative
-            z => zero
-            p => positive
-        only case
-    else
-        Invalid
-*/
-bool isBRInstruction(char *token) 
-{
-    // Check if token starts with "BR" and optionally followed by any of 'n', 'z', 'p'.
-    if (strncmp(token, "BR", 2) == 0) 
-    {
-        int i;
-        for (i = 2; token[i] != '\0'; i++) 
-        {
-            if (token[i] != 'n' && token[i] != 'z' && token[i] != 'p') 
-            {
-                return false; // Extra characters that are not 'n', 'z', or 'p'.
-            }
-        }
-        return true; // Token is a valid BR instruction.
-    }
-    return false; // Token does not start with "BR".
-}
-
-bool parseBR(const char *instruction, char labels[][MAX_LABEL_LEN], int labelCount, char *labelOut) 
-{
-    // Ensure instruction starts with "BR"
-    if (strncmp(instruction, "BR", 2) != 0) 
-    {
-        return false;
-    }
-
-    int i = 2; // Start index after "BR"
-    while (instruction[i] == 'n' || instruction[i] == 'z' || instruction[i] == 'p') 
-    {
-        i++;
-    }
-
-    // Initialize an index for labelOut
-    int j = 0;
-    // Skip whitespace after condition codes to start of label
-    while (isspace(instruction[i])) i++;
-    // Copy the label part into labelOut, stop at comment or end of line
-    while (instruction[i] != '\0' && instruction[i] != ';' && !isspace(instruction[i])) 
-    {
-        labelOut[j++] = instruction[i++];
-    }
-    labelOut[j] = '\0'; // Null-terminate the label
-
-    // Before validating, ensure labelOut is not empty
-    if (strlen(labelOut) == 0) 
-    {
-        return false; // No label found
-    }
-
-    // Validate the extracted label
-    return isValidLabel(labelOut, labels, labelCount);
-}
-
-/* 
-    LD -> Validate
-    if 
-        2 parameters seperated by ','
-        case:
-            DR, LABEL
-    else
-        Invalid
-*/
-bool parseLD(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount) 
-{
-    // Skip whitespace before DR
-    while (isspace(peek(0, source, minIndex))) 
-    {
-        consume(source, minIndex);
-    }
-
-    char tokenBuffer[256];
-    int tokenIndex = 0;
-    // Parse DR
-    while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != ',' && peek(0, source, minIndex) != '\0') 
-    {
-        tokenBuffer[tokenIndex] = consume(source, minIndex);
-        tokenIndex++;
-    }
-    tokenBuffer[tokenIndex] = '\0'; 
-
-    if (!isRegister(tokenBuffer)) 
-    {
-        return false;
-    }
-
-    // Skip whitespace (and comma if present) before the label
-    while (isspace(peek(0, source, minIndex)) || peek(0, source, minIndex) == ',') 
-    {
-        consume(source, minIndex);
-    }
-
-    // Reset for label parsing
-    tokenIndex = 0;
-    // Parse LABEL
-    while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != '\0') 
-    {
-        tokenBuffer[tokenIndex] = consume(source, minIndex);
-        tokenIndex++;
-    }
-    tokenBuffer[tokenIndex] = '\0';
-
-    // Check if label is valid
-    return isValidLabel(tokenBuffer, labels, labelCount);
-}
-
-/* 
-    LDI -> Validate
-    if 
-        2 parameters seperated by ','
-        case:
-            DR, LABEL
-    else
-        Invalid
-*/
-bool parseLDI(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount) 
-{
-    // Skip any whitespace after the "LDI" instruction
-    while (isspace(peek(0, source, minIndex))) 
-    {
-        consume(source, minIndex);
-    }
-
-    // Parse and validate the destination register (DR)
-    char registerBuffer[256];
-    int registerIndex = 0;
-    while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != ',' && peek(0, source, minIndex) != '\0') 
-    {
-        registerBuffer[registerIndex++] = consume(source, minIndex);
-    }
-    registerBuffer[registerIndex] = '\0'; // Null-terminate the register part
-
-    // Check if the first operand (DR) is a valid register
-    if (!isRegister(registerBuffer)) 
-    {
-        printf("Register not valid: %s\n", registerBuffer);
-        return false;
-    }
-
-    // Skip the comma and any whitespace before the label
-    if (peek(0, source, minIndex) == ',') 
-    {
-        consume(source, minIndex); // Consume the comma
-    }
-    while (isspace(peek(0, source, minIndex))) 
-    {
-        consume(source, minIndex);
-    }
-
-    // Parse the label
-    char labelBuffer[256];
-    int labelIndex = 0;
-    while (peek(0, source, minIndex) != '\0' && peek(0, source, minIndex) != ';' && !isspace(peek(0, source, minIndex))) 
-    {
-        labelBuffer[labelIndex++] = consume(source, minIndex);
-    }
-    labelBuffer[labelIndex] = '\0'; // Null-terminate the label
-
-    // Validate the extracted label
-    if (isValidLabel(labelBuffer, labels, labelCount)) 
-    {
-        // Successfully parsed and validated the label
-        printf("Valid label for LDI: %s\n", labelBuffer);
-        return true;
-    } 
-    else 
-    {
-        // Label validation failed
-        printf("Label not valid or not found for LDI: %s\n", labelBuffer);
-        return false;
-    }
-}
-
-bool isOffset6(char *offset) 
-{
-    if (offset[0] != '#') 
-    {
-        return false;
-    }
-
-    int val = atoi(offset + 1); 
-    if (val >= -32 && val <= 31) 
-    {
-        return true;
-    }
-    return false;
-}
-
-/* 
-    LDR -> Validate
-    if 
-        3 parameters seperated by ','
-        case:
-            DR, SR1, offset6
-    else
-        Invalid
-*/
-bool parseLDR(char *source, int *minIndex, char *operandsBuffer) 
-{
-    int tokenCount;
-    operandsBuffer[0] = '\0'; // Ensure the buffer starts empty.
-
-    for (tokenCount = 0; tokenCount < 3; tokenCount++) 
-    {
-        // Skip whitespace
-        while (isspace(peek(0, source, minIndex))) 
-        {
-            consume(source, minIndex);
-        }
-
-        char tokenBuffer[256];
-        int tokenIndex = 0; // Initialize tokenIndex to 0
-        while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != ',' && peek(0, source, minIndex) != '\0') 
-        {
-            tokenBuffer[tokenIndex++] = consume(source, minIndex); // Use tokenIndex++ to increment after use
-        }
-        tokenBuffer[tokenIndex] = '\0'; // Null-terminate the token
-
-        // Append the token to the operands buffer, separating operands with a comma
-        if (tokenCount > 0) 
-        {
-            strncat(operandsBuffer, ",", 255 - strlen(operandsBuffer));
-        }
-        strncat(operandsBuffer, tokenBuffer, 255 - strlen(operandsBuffer));
-
-        if (tokenCount < 2) 
-        {
-            if (!isRegister(tokenBuffer)) 
-            {
-                return false; // The first two tokens must be registers
-            }
-        } 
-        else 
-        {
-            if (!isOffset6(tokenBuffer)) 
-            {
-                return false; // The last token must be an offset6
-            }
-        }
-
-        // Consume the comma after the first two operands but not after the third
-        if (tokenCount < 2) 
-        {
-            if (peek(0, source, minIndex) != ',') 
-            {
-                return false; // Expecting a comma here
-            } 
-            else 
-            {
-                consume(source, minIndex); // Consume the comma
-            }
-        }
-    }
-
-    return true; // If all tokens are parsed successfully, return true
-}
-
-/* 
-    LEA -> Validate
-    if 
-        2 parameters seperated by ','
-        case:
-            DR, LABEL
-    else
-        Invalid
-*/
-bool parseLEA(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount) 
-{
-    while (isspace(peek(0, source, minIndex))) 
-    {
-        consume(source, minIndex);
-    }
-
-    // DR part
-    char registerBuffer[256];
-    int registerIndex = 0;
-    while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != ',' && peek(0, source, minIndex) != '\0') 
-    {
-        registerBuffer[registerIndex++] = consume(source, minIndex);
-    }
-    registerBuffer[registerIndex] = '\0'; // Null-terminate the register part
-
-    // Check if the first operand (DR) is a valid register
-    if (!isRegister(registerBuffer)) 
-    {
-        return false;
-    }
-
-    // Skip the comma after the DR part
-    if (peek(0, source, minIndex) == ',') 
-    {
-        consume(source, minIndex); // Consume the comma
-    }
-
-    // Skip any whitespace before the label
-    while (isspace(peek(0, source, minIndex))) 
-    {
-        consume(source, minIndex);
-    }
-
-    // Label part
-    char labelBuffer[256];
-    int labelIndex = 0;
-    while (peek(0, source, minIndex) != '\0' && peek(0, source, minIndex) != ';' && !isspace(peek(0, source, minIndex))) 
-    {
-        labelBuffer[labelIndex++] = consume(source, minIndex); // Increment and assign
-    }
-    labelBuffer[labelIndex] = '\0'; // Null-terminate the label part
-
-    // Validate the extracted label
-    return isValidLabel(labelBuffer, labels, labelCount);
-}
-
-/* 
-    NOT -> Validate
-    if 
-        2 parameters seperated by ','
-        case:
-            DR, SR1
-    else
-        Invalid
-*/
-bool parseNOT(char *source, int *minIndex, char *operandsOut) 
-{
-    char drBuffer[256], srBuffer[256];
-    int drIndex = 0, srIndex = 0;
-    bool commaEncountered = false;
-
-    // Initialize the operands output string.
-    operandsOut[0] = '\0';
-
-    // Skip whitespace before the first register (DR)
-    while (isspace(peek(0, source, minIndex))) 
-    {
-        consume(source, minIndex);
-    }
-
-    // Collect characters for DR until a comma or whitespace is encountered
-    while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != ',' && peek(0, source, minIndex) != '\0') 
-    {
-        drBuffer[drIndex++] = consume(source, minIndex);
-    }
-    drBuffer[drIndex] = '\0'; // Null-terminate the DR operand
-
-    // Skip over comma and whitespace to reach the second register (SR)
-    while (peek(0, source, minIndex) == ',' || isspace(peek(0, source, minIndex))) 
-    {
-        consume(source, minIndex);
-        commaEncountered = true; // Ensure a comma has been encountered to expect SR
-    }
-
-    // Only proceed to parse SR if a comma was encountered after DR
-    if (commaEncountered) 
-    {
-        // Collect characters for SR
-        while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != '\0') 
-        {
-            srBuffer[srIndex++] = consume(source, minIndex);
-        }
-        srBuffer[srIndex] = '\0'; // Null-terminate the SR operand
-
-        // Validate both operands are valid registers
-        if (isRegister(drBuffer) && isRegister(srBuffer)) 
-        {
-            // Format operandsOut as "DR,SR"
-            sprintf(operandsOut, "%s,%s", drBuffer, srBuffer);
-            return true; // Successfully parsed both registers
-        }
-    }
-
-    return false; // Failed to parse valid registers for NOT instruction
-}
-
-/* 
-    ST -> Validate
-    if 
-        2 parameters seperated by ','
-        case:
-            SR1, LABEL
-    else
-        Invalid
-*/
-bool parseST(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount) 
-{
-    while (isspace(peek(0, source, minIndex))) 
-    {
-        consume(source, minIndex);
-    }
-
-    // SR part
-    char registerBuffer[256];
-    int registerIndex = -1;
-    while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != ',' && peek(0, source, minIndex) != '\0') 
-    {
-        registerBuffer[++registerIndex] = consume(source, minIndex);
-    }
-    registerBuffer[registerIndex + 1] = '\0'; // Null-terminate the register part
-
-    // Check if the first operand (SR) is a valid register
-    if (!isRegister(registerBuffer)) 
-    {
-        return false;
-    }
-
-    // Skip over the comma (if present) and any whitespace after the register
-    if (peek(0, source, minIndex) == ',') 
-    {
-        consume(source, minIndex); // Skip the comma
-    }
-    while (isspace(peek(0, source, minIndex))) 
-    {
-        consume(source, minIndex); // Skip any whitespace
-    }
-
-    // Label part
-    char labelBuffer[256];
-    int labelIndex = -1;
-    while (peek(0, source, minIndex) != '\0' && peek(0, source, minIndex) != ';') 
-    {
-        if (isspace(peek(0, source, minIndex))) 
-        {
-            // Stop at the first whitespace after the label
-            break;
-        }
-        labelBuffer[++labelIndex] = consume(source, minIndex); // Pre-increment index
-    }
-    labelBuffer[labelIndex + 1] = '\0'; // Null-terminate the label part
-
-    // Validate the extracted label
-    return isValidLabel(labelBuffer, labels, labelCount);
-}
-
-/* 
-    STI -> Validate
-    if 
-        2 parameters seperated by ','
-        case:
-            SR1, LABEL
-    else
-        Invalid
-*/
-bool parseSTI(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount)
-{
-    while (isspace(peek(0, source, minIndex)))
-    {
-        consume(source, minIndex);
-    }
-
-    char tokenBuffer[256];
-    int tokenIndex = 0;
-    while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != ',' && peek(0, source, minIndex) != '\0')
-    {
-        tokenIndex++;
-        tokenBuffer[tokenIndex] = consume(source, minIndex);
-    }
-    tokenBuffer[tokenIndex] = '\0';
-
-    if (!isRegister(tokenBuffer))
-    {
-        return false;
-    }
-
-    while (isspace(peek(0, source, minIndex)))
-    {
-        consume(source, minIndex);
-    }
-
-    tokenIndex = 0;
-    while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != '\0')
-    {
-        tokenIndex++;
-        tokenBuffer[tokenIndex] = consume(source, minIndex);
-    }
-    tokenBuffer[tokenIndex] = '\0';
-
-    if (isValidLabel(tokenBuffer, labels, labelCount))
-    {
-        return true;
-    }
-    else 
-    {
-        return false;
-    }
-}
-
-/* 
-    STR -> Validate
-    if 
-        3 parameters seperated by ','
-        case:
-            SR1, SR2, offset6
-    else
-        Invalid
-*/
-bool parseSTR(char *source, int *minIndex, char *operandsOut) 
-{
-    int tokenCount;
-    operandsOut[0] = '\0';  // Initialize the operands output string.
-
-    for (tokenCount = 0; tokenCount < 3; tokenCount++) 
-    {
-        // Skip whitespace
-        while (isspace(peek(0, source, minIndex))) 
-        {
-            consume(source, minIndex);
-        }
-
-        char tokenBuffer[256];
-        int tokenIndex = 0; // Initialize tokenIndex to 0
-        while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != ',' && peek(0, source, minIndex) != '\0') 
-        {
-            tokenBuffer[tokenIndex++] = consume(source, minIndex); // Corrected to tokenIndex++
-        }
-        tokenBuffer[tokenIndex] = '\0'; // Null-terminate the token
-
-        // Append the token to the operands output
-        strcat(operandsOut, tokenBuffer);
-        if (tokenCount < 2) 
-        {
-            strcat(operandsOut, ",");  // Add a comma after the first two operands
-        }
-
-        if (tokenCount < 2) 
-        {
-            // Consume the comma after the first two operands
-            if (peek(0, source, minIndex) != ',') 
-            {
-                return false;
-            } 
-            else 
-            {
-                consume(source, minIndex);
-            }
-        }
-    }
-
-    return true; // Return true if all operands are valid and processed
-}
-
-bool isValidTrapVector(const char *offset) 
-{
-    unsigned int val;
-    sscanf(offset, "%x", &val); // Convert hex string to unsigned int
-    return val <= 0xFF; // Trap vectors are 8-bit, so valid if within this range
-}
-
-/* 
-    TRAP -> Validate
-    if 
-        1 parameter seperated by ','
-        case:
-            trapvector8
-    else
-        Invalid
-*/
-bool parseTRAP(char *source, int *minIndex, int *trapVector) 
-{
-    while (isspace(source[*minIndex])) (*minIndex)++;
-    if (source[*minIndex] != 'x' && source[*minIndex] != 'X') return false;
-
-    (*minIndex)++; // Skip 'x' or 'X'
-    char trapVectorStr[5]; // Enough to hold 4 hex digits and a null terminator
-    int i = 0;
-    while (isxdigit(source[*minIndex]) && i < 4) 
-    {
-        trapVectorStr[i++] = source[(*minIndex)++];
-    }
-    trapVectorStr[i] = '\0'; // Null-terminate the string
-
-    if (!isValidTrapVector(trapVectorStr)) return false;
-
-    *trapVector = strtol(trapVectorStr, NULL, 16); // Convert hexadecimal string to integer
-
-    return true; // Successfully parsed trap vector
-}
-
-bool parseSEMI(char *source, int *minIndex)
-{
-    if (peek(0, source, minIndex) != ';')
-    {
-        return true;
-    }
-
-    while (peek(0, source, minIndex) != '\n' && peek(0, source, minIndex) != '\0')
-    {
-        consume(source, minIndex);
-    }
-
-    return true;
-}
-
-bool parseFILL(char *source, int *minIndex, int *immValue) 
-{
-    // Skip whitespace
-    while (isspace(source[*minIndex])) (*minIndex)++;
-
-    // Extract the operand
-    char operandBuffer[256];
-    int i = 0;
-    while (source[*minIndex] != '\0' && source[*minIndex] != '\n' && !isspace(source[*minIndex])) 
-    {
-        operandBuffer[i++] = source[*minIndex];
-        (*minIndex)++;
-    }
-    operandBuffer[i] = '\0'; // Null-terminate the string
-
-    // Validate the operand
-    if (!isImm5(operandBuffer)) 
-    {
-        return false;
-    }
-
-    // Convert the immediate value to an integer
-    if (operandBuffer[0] == '#') 
-    {
-        *immValue = atoi(operandBuffer + 1); // Skip the '#' and convert
-    } 
-    else 
-    {
-        *immValue = atoi(operandBuffer); // Directly convert if no '#' prefix
-    }
-
-    return true;
-}
-
-bool parseEND(char *source, int *minIndex) 
-{
-    // Move past any whitespace before checking for .END
-    while (isspace(source[*minIndex])) 
-    {
-        (*minIndex)++;
-    }
-
-    // Check if the rest of the line is just comments or whitespace
-    while (source[*minIndex] != '\0' && source[*minIndex] != '\n') 
-    {
-        if (source[*minIndex] == ';') 
-        {
-            // .END is valid, there's a comment following it
-            return true;
-        } 
-        else if (!isspace(source[*minIndex])) 
-        {
-            // Found a non-space character before a comment or end of line, .END is not valid
-            return false;
-        }
-        (*minIndex)++;
-    }
-
-    // Reached the end of the line without finding non-whitespace characters before any comment
-    return true;
-}
-
-bool parseBLKW(char *source, int *minIndex, int *blockSize) 
-{
-    while (isspace(source[*minIndex])) 
-    {
-        (*minIndex)++;
-    }
-
-    char blockSizeStr[10];
-    int i = 0;
-    while (isdigit(source[*minIndex]) && i < (sizeof(blockSizeStr) - 1)) 
-    {
-        blockSizeStr[i++] = source[(*minIndex)++];
-    }
-    blockSizeStr[i] = '\0'; // Null-terminate the string
-
-    if (i == 0) 
-    {
-        // No digits were found, indicating an invalid block size
-        return false;
-    }
-
-    *blockSize = atoi(blockSizeStr); // Convert the block size string to an integer
-
-    if (*blockSize < 0) 
-    {
-        // Block size is invalid if it's negative
-        return false;
-    }
-
-    return true; // Successfully parsed block size
-}
-
-const char *getOpcodeForToken(BinOps binaryOps)
-{
-    int i;
-    for (i = 0; instructionMap[i].binaryOps != INVALID_OP; i++)
-    {
-        if (instructionMap[i].binaryOps == binaryOps)
-        {
-            return instructionMap[i].opcode;
-        }
-    }
-    return NULL;
-}
-
-const char *getBinValForRegister(RegisterTokens regTok)
-{
-    int i;
-    for (i = 0; registerMap[i].regTok != INVALID_REGISTER; i++)
-    {
-        if (registerMap[i].regTok == regTok)
-        {
-            return registerMap[i].binVal;
-        }
-    }
-    return NULL;
-}
-
-const char *getCommentForInstruction(BinOps binaryOps)
-{
-    int i;
-    for (i = 0; commentMap[i].binaryOps != INVALID_OP; i++)
-    {
-        if (commentMap[i].binaryOps == binaryOps)
-        {
-            return commentMap[i].comment;
-        }
-    }
-    return NULL;
-}
-
-void processOperands(const char *operandsBuffer, char *binaryOut, Tokens tokenType) 
-{
-    binaryOut[0] = '\0'; // Initialize the binaryOut buffer to an empty string
-    
-    switch (tokenType) 
-    {
-        case AND: {
-            char drBuffer[256], srBuffer[256], immediateBuffer[256];
-            // Parse the operandsBuffer to extract DR, SR, and possibly an immediate value
-            int operandCount = sscanf(operandsBuffer, "%[^,],%[^,],%s", drBuffer, srBuffer, immediateBuffer);
-            
-            // Convert DR and SR to their binary representations
-            const char *binaryDR = getBinValForRegister(validateRegisterToken(drBuffer));
-            const char *binarySR = getBinValForRegister(validateRegisterToken(srBuffer));
-
-            // Begin constructing the binary output for AND instruction
-            strcat(binaryOut, binaryDR); // Append DR's binary representation
-            strcat(binaryOut, binarySR); // Append SR's binary representation
-
-            if (operandCount == 3) 
-            {
-                if (immediateBuffer[0] == '#') 
-                {
-                    strcat(binaryOut, "1"); // Append "1" to indicate immediate mode
-
-                    // Convert the immediate value to binary and append it
-                    char binaryImm[16];
-                    immToBinary(immediateBuffer, binaryImm, 5);
-                    strcat(binaryOut, binaryImm);
-                } 
-                else 
-                {
-                    printf("Non-immediate third operand!\n");
-                }
-            } 
-            else 
-            {
-                // If not using immediate mode, append "0" and five "0"s to complete the instruction format
-                // This case handles AND instructions that do not use immediate values (register mode)
-                strcat(binaryOut, "0"); // Append "0" to indicate register mode
-                strcat(binaryOut, "00000"); // Append five "0"s for padding
-            }
-            break;
-        }
-        case ADD: {
-            char drBuffer[256], sr1Buffer[256], secondOperandBuffer[256];
-            // Parse the operandsBuffer to extract DR, SR1, and either SR2 or an immediate value
-            int operandCount = sscanf(operandsBuffer, "%[^,],%[^,],%s", drBuffer, sr1Buffer, secondOperandBuffer);
-            
-            // Convert DR and SR1 to their binary representations
-            const char *binaryDR = getBinValForRegister(validateRegisterToken(drBuffer));
-            const char *binarySR1 = getBinValForRegister(validateRegisterToken(sr1Buffer));
-
-            // Begin constructing the binary output for ADD instruction
-            strcat(binaryOut, binaryDR); // Append DR's binary representation
-            strcat(binaryOut, binarySR1); // Append SR1's binary representation
-
-            if (operandCount == 3) 
-            {
-                if (secondOperandBuffer[0] == '#') 
-                {
-                    strcat(binaryOut, "1"); // Append "1" to indicate immediate mode
-
-                    // Convert the immediate value to binary and append it
-                    char binaryImm[16];
-                    immToBinary(secondOperandBuffer, binaryImm, 5);
-                    strcat(binaryOut, binaryImm);
-                } 
-                else 
-                {
-                    // Third operand is a register (SR2)
-                    strcat(binaryOut, "000"); // Append "000" to indicate it's a register operation
-                    const char *binarySR2 = getBinValForRegister(validateRegisterToken(secondOperandBuffer));
-                    strcat(binaryOut, binarySR2); // Append SR2's binary representation
-                }
-            } 
-            else 
-            {
-                printf("Operand count doesn't match expectations for ADD instruction.\n");
-            }
-            break;
-        }
-        case NOT: {
-            char drBuffer[256], srBuffer[256];
-            sscanf(operandsBuffer, "%[^,],%s", drBuffer, srBuffer); // Split operandsBuffer into DR and SR
-            
-            // Convert DR and SR to their binary representations
-            const char *binaryDR = getBinValForRegister(validateRegisterToken(drBuffer));
-            const char *binarySR = getBinValForRegister(validateRegisterToken(srBuffer));
-            
-            // Construct the binary instruction with "111111" appended
-            sprintf(binaryOut, "%s%s111111", binaryDR, binarySR);
-            break;
-        }
-        case LDR: {
-            char drBuffer[256], baseRBuffer[256], offsetBuffer[256];
-            // Parse the operandsBuffer to extract DR, BaseR, and offset
-            int operandCount = sscanf(operandsBuffer, "%[^,],%[^,],%s", drBuffer, baseRBuffer, offsetBuffer);
-            
-            // Convert DR and BaseR to their binary representations
-            const char *binaryDR = getBinValForRegister(validateRegisterToken(drBuffer));
-            const char *binaryBaseR = getBinValForRegister(validateRegisterToken(baseRBuffer));
-
-            // Begin constructing the binary output for LDR instruction
-            strcat(binaryOut, binaryDR); // Append DR's binary representation
-            strcat(binaryOut, binaryBaseR); // Append BaseR's binary representation
-
-            if (operandCount == 3) 
-            {
-                // Convert the offset value to a 6-bit binary and append it
-                char binaryOffset[16];
-                immToBinary(offsetBuffer, binaryOffset, 6);
-                strcat(binaryOut, binaryOffset);
-            } 
-            else 
-            {
-                printf("Operand count doesn't match expectations for LDR instruction.\n");
-            }
-            break;
-        }
-        case STR: {
-            char srBuffer[256], baseRBuffer[256], offsetBuffer[256];
-            // Parse the operandsBuffer to extract SR, BaseR, and offset
-            int operandCount = sscanf(operandsBuffer, "%[^,],%[^,],%s", srBuffer, baseRBuffer, offsetBuffer);
-            
-            // Convert SR and BaseR to their binary representations
-            const char *binarySR = getBinValForRegister(validateRegisterToken(srBuffer));
-            const char *binaryBaseR = getBinValForRegister(validateRegisterToken(baseRBuffer));
-
-            // Begin constructing the binary output for STR instruction
-            strcat(binaryOut, binarySR); // Append SR's binary representation
-            strcat(binaryOut, binaryBaseR); // Append BaseR's binary representation
-
-            if (operandCount == 3) 
-            {
-                // Convert the offset value to a 6-bit binary and append it
-                char binaryOffset[16];
-                immToBinary(offsetBuffer, binaryOffset, 6);
-                strcat(binaryOut, binaryOffset);
-            } 
-            else 
-            {
-                printf("Operand count doesn't match expectations for STR instruction.\n");
-            }
-            break;
-        }
-        default: {
-            char operand[256];
-            int opIndex = 0; // Index to build up each operand string
-            int binIndex = 0; // Index for the binaryOut string
-            
-            int immediateSize = 5;
-
-            int i;
-            for (i = 0; operandsBuffer[i] != '\0'; i++) 
-            {
-                if (operandsBuffer[i] == ',' || operandsBuffer[i] == ' ') 
-                {
-                    if (opIndex > 0) 
-                    {
-                        operand[opIndex] = '\0'; // Null-terminate the current operand
-                        if (operand[0] == 'R') 
-                        {
-                            // Operand is a register
-                            const char *binaryReg = getBinValForRegister(validateRegisterToken(operand));
-                            strcat(binaryOut, binaryReg);
-                        } 
-                        else if (operand[0] == '#') 
-                        {
-                            // Operand is an immediate value
-                            char binaryImm[16];
-                            immToBinary(operand, binaryImm, immediateSize);
-                            strcat(binaryOut, binaryImm);
-                        }
-                        opIndex = 0; // Reset operand index for the next operand
-                    }
-                } 
-                else 
-                {
-                    operand[opIndex++] = operandsBuffer[i];
-                }
-            }
-
-            // Process the last operand, if any
-            if (opIndex > 0) 
-            {
-                operand[opIndex] = '\0'; // Null-terminate the last operand
-                if (operand[0] == 'R') 
-                {
-                    // Operand is a register
-                    const char *binaryReg = getBinValForRegister(validateRegisterToken(operand));
-                    strcat(binaryOut, binaryReg);
-                } 
-                else if (operand[0] == '#') 
-                {
-                    // Operand is an immediate value
-                    char binaryImm[16];
-                    immToBinary(operand, binaryImm, immediateSize);
-                    strcat(binaryOut, binaryImm);
-                }
-            }
-            break;
-        }
-    }
-}
-
-void immToBinary(const char *immStr, char *binaryOut, int immediateSize) 
-{
-    // Skip the '#' character to get the integer value
-    int immVal = atoi(immStr + 1);
-
-    // Calculate the maximum value based on the immediate size
-    int maxVal = (1 << (immediateSize - 1)) - 1;
-    int minVal = -maxVal - 1;
-
-    // Check if the value is within the valid range
-    if (immVal < minVal || immVal > maxVal) 
-    {
-        strcpy(binaryOut, "ERROR");
-        return;
-    }
-
-    // Adjust the value for negative numbers to fit into the specified bit size
-    if (immVal < 0) 
-    {
-        immVal = (1 << immediateSize) + immVal;
-    }
-
-    // Convert to binary representation
-    int i;
-    for (i = immediateSize - 1; i >= 0; i--) 
-    {
-        binaryOut[i] = (immVal & 1) ? '1' : '0';
-        immVal >>= 1;
-    }
-    binaryOut[immediateSize] = '\0';
-}
-
-void writeLineToBin(const char *opcode, const char *binaryOut, const char *comment, FILE *binFile) 
-{
-    int spaceNeeded = (strlen(binaryOut) > 0) ? 1 : 0;
-
-    // Calculate the total length considering the opcode, binary output, comment, and newline.
-    int totalLen = strlen(opcode) + strlen(binaryOut) + strlen(comment) + spaceNeeded + 2; // +2 for the newline and null terminator
-
-    char *binaryLine = (char *)malloc(totalLen * sizeof(char));
-    if (binaryLine == NULL) 
-    {
-        fprintf(stderr, "Memory allocation failed.\n");
-        exit(EXIT_FAILURE);
-    }
-
-    // Concatenate opcode, binary output (with a space if needed), and comment into one line
-    snprintf(binaryLine, totalLen, "%s%s%s%s\n", opcode, binaryOut, spaceNeeded ? " " : "", comment);
-
-    // Write the combined line to the binary file
-    fwrite(binaryLine, sizeof(char), strlen(binaryLine), binFile);
-
-    free(binaryLine);
-}
-
-void hexToBinary(unsigned int hex, char *binary, int bits) 
-{
-    binary[bits] = '\0';
-    int i;
-    for (i = bits - 1; i >= 0; i--) 
-    {
-        binary[i] = (hex & 1) ? '1' : '0';
-        hex >>= 1;
-    }
 }
