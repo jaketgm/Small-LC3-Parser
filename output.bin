@@ -7,6 +7,7 @@
 0111000001000000 ; STR statement responsible for storing some defined SR2 into some defined SR1, with some offset6
 0001011011000001 ; ADD statement responsible for adding some SR1 and SR2, and placing the result in some DR.
 0001010010111111 ; ADD statement responsible for adding some SR1 and Imm5, and placing the result in some DR.
+0000001111111100 ; BR statement responsible for branching on some condition (n/z/p) to some defined LABEL
 1111000000100010 ; TRAP statement responsible for invoking exiting syscall
 ; Reserved word 1 of 254 from .BLKW
 ; Reserved word 2 of 254 from .BLKW

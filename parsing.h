@@ -183,37 +183,32 @@ bool parseAND(char *source, int *minIndex, char *operandsOut)
 */
 bool parseBR(const char *instruction, char labels[][MAX_LABEL_LEN], int labelCount, char *labelOut) 
 {
-    // Ensure instruction starts with "BR"
+    // Check if instruction starts with "BR"
     if (strncmp(instruction, "BR", 2) != 0) 
     {
         return false;
     }
 
     int i = 2; // Start index after "BR"
+    // Skip condition codes
     while (instruction[i] == 'n' || instruction[i] == 'z' || instruction[i] == 'p') 
     {
         i++;
     }
 
-    // Initialize an index for labelOut
-    int j = 0;
-    // Skip whitespace after condition codes to start of label
+    // Move past any whitespace after condition codes
     while (isspace(instruction[i])) i++;
-    // Copy the label part into labelOut, stop at comment or end of line
+
+    // Copy label to labelOut, ensuring null termination
+    int j = 0;
     while (instruction[i] != '\0' && instruction[i] != ';' && !isspace(instruction[i])) 
     {
         labelOut[j++] = instruction[i++];
     }
-    labelOut[j] = '\0'; // Null-terminate the label
+    labelOut[j] = '\0'; // Ensure null termination
 
-    // Before validating, ensure labelOut is not empty
-    if (strlen(labelOut) == 0) 
-    {
-        return false; // No label found
-    }
-
-    // Validate the extracted label
-    return isValidLabel(labelOut, labels, labelCount);
+    // Validate extracted label is not empty and exists
+    return strlen(labelOut) > 0 && isValidLabel(labelOut, labels, labelCount);
 }
 
 /* 

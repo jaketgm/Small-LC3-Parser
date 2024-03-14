@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <ctype.h>
+#include <limits.h>
 
 char peek(int offset, char *source, int *minIndex) 
 {
@@ -284,42 +285,6 @@ void processOperands(const char *operandsBuffer, char *binaryOut, Tokens tokenTy
             }
             break;
         }
-        case BR: {
-            char conditionCodes[4] = {0};
-            sscanf(operandsBuffer, "%3s", conditionCodes); // Extract condition codes
-            
-            char label[256];
-            // Assuming the label immediately follows the condition codes
-            strcpy(label, operandsBuffer + 4); // +4 to skip over the condition codes and space
-
-            // Translate condition codes to binary
-            char conditionBinary[4] = "000"; // Default to 000 for BR instruction
-            if (strchr(conditionCodes, 'n')) conditionBinary[0] = '1';
-            if (strchr(conditionCodes, 'z')) conditionBinary[1] = '1';
-            if (strchr(conditionCodes, 'p')) conditionBinary[2] = '1';
-
-            // Find the label's line number
-            int labelLineNum = -1;
-            for (int i = 0; i < labelCount; i++) {
-                if (strcmp(labelInfos[i].label, label) == 0) {
-                    labelLineNum = labelInfos[i].lineNum;
-                    break;
-                }
-            }
-
-            if (labelLineNum == -1) {
-                printf("Label '%s' not found.\n", label);
-                return; // Exit if label is not found
-            }
-
-            // Convert the line number difference to binary
-            char lineNumBinary[10]; // 9 bits + null terminator for the offset
-            convertLineNumToBin(labelLineNum - currentLine, lineNumBinary, 9); // Assuming convertLineNumberToBinary is defined
-
-            // Construct the full binary instruction for BR
-            snprintf(binaryOut, 17, "0000%s%s", conditionBinary, lineNumBinary);
-            break;
-        }
         default: {
             char operand[256];
             int opIndex = 0; // Index to build up each operand string
@@ -414,24 +379,24 @@ void immToBinary(const char *immStr, char *binaryOut, int immediateSize)
 
 void writeLineToBin(const char *opcode, const char *binaryOut, const char *comment, FILE *binFile) 
 {
+    // Determine if a space is needed between binary output and comment
     int spaceNeeded = (strlen(binaryOut) > 0) ? 1 : 0;
+    // Calculate total length for the binary line
+    int totalLen = strlen(opcode) + strlen(binaryOut) + strlen(comment) + spaceNeeded + 2; // +2 for newline and null terminator
 
-    // Calculate the total length considering the opcode, binary output, comment, and newline.
-    int totalLen = strlen(opcode) + strlen(binaryOut) + strlen(comment) + spaceNeeded + 2; // +2 for the newline and null terminator
-
+    // Allocate memory for the binary line
     char *binaryLine = (char *)malloc(totalLen * sizeof(char));
-    if (binaryLine == NULL) 
+    if (!binaryLine) 
     {
         fprintf(stderr, "Memory allocation failed.\n");
         exit(EXIT_FAILURE);
     }
 
-    // Concatenate opcode, binary output (with a space if needed), and comment into one line
+    // Format the binary line combining opcode, binary output, and comment
     snprintf(binaryLine, totalLen, "%s%s%s%s\n", opcode, binaryOut, spaceNeeded ? " " : "", comment);
-
-    // Write the combined line to the binary file
+    // Write to file
     fwrite(binaryLine, sizeof(char), strlen(binaryLine), binFile);
-
+    // Free allocated memory
     free(binaryLine);
 }
 
@@ -449,16 +414,63 @@ void hexToBinary(unsigned int hex, char *binary, int bits)
 void convertLineNumToBin(int lineNum, char *binaryRepresentation, int bits) 
 {
     // Initialize all bits to '0'
-    for (int i = 0; i < bits; i++) {
+    for (int i = 0; i < bits; i++) 
+    {
         binaryRepresentation[i] = '0';
     }
     binaryRepresentation[bits] = '\0'; // Null-terminate the string
 
     // Convert lineNum to binary representation
-    for (int i = bits - 1; i >= 0 && lineNum > 0; i--) {
+    for (int i = bits - 1; i >= 0 && lineNum > 0; i--) 
+    {
         binaryRepresentation[i] = (lineNum % 2) + '0';
         lineNum /= 2;
     }
+}
+
+int calculateOffset(const char* targetLabel, LabelInfo labels[], int labelCount, int currentAddress) 
+{
+    int targetAddress = -1;
+    for (int i = 0; i < labelCount; i++) 
+    {
+        if (strcmp(labels[i].label, targetLabel) == 0) 
+        {
+            targetAddress = labels[i].address;
+            break;
+        }
+    }
+
+    if (targetAddress == -1) 
+    {
+        printf("Error: Label '%s' not found.\n", targetLabel);
+        return INT_MIN; // Signal error
+    }
+
+    // Calculate the offset. Note: currentAddress points to the BR instruction itself.
+    printf("Current Address: x%X\n", currentAddress);
+    printf("Target Address: x%X\n", targetAddress);
+    int offset = (targetAddress - (currentAddress + 2)) / 2; // Adjust for PC pointing to next instruction
+
+    return offset;
+}
+
+void intToBinary(int value, char *binaryOut, int size) 
+{
+    if (value < 0) 
+    {
+        // Calculate two's complement for negative numbers
+        value = (1 << size) + value; // Adding value (which is negative) to 2^size gives the two's complement
+    }
+
+    int mask = 1 << (size - 1); // Start with the most significant bit
+
+    for (int i = 0; i < size; i++) 
+    {
+        binaryOut[i] = (value & mask) ? '1' : '0';
+        mask >>= 1;
+    }
+
+    binaryOut[size] = '\0'; // Null-terminate the string
 }
 
 #endif

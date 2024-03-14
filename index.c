@@ -128,6 +128,7 @@ RegisterMap registerMap[] = {
 typedef struct {
     char label[MAX_LABEL_LEN];
     int lineNum;
+    int address;
 } LabelInfo;
 
 char peek(int offset, char *source, int *minIndex);
@@ -144,7 +145,6 @@ bool addLabel(char labels[][MAX_LABEL_LEN], int* labelCount, const char* tokenBu
 bool isOffset6(char *offset);
 bool isValidTrapVector(const char *offset);
 
-// Parsers for tokens
 bool parseORIG(char *source, int *minIndex, unsigned int *address);
 bool parseADD(char *source, int *minIndex, char *operandsOut); 
 bool parseAND(char *source, int *minIndex, char *operandsOut);
@@ -173,6 +173,8 @@ void immToBinary(const char *immStr, char *binaryOut, int immediateSize);
 void writeLineToBin(const char *opcode, const char *binaryOut, const char *comment, FILE *binFile); 
 void hexToBinary(unsigned int hex, char *binary, int bits);
 void convertLineNumToBin(int lineNum, char *binaryRepresentation, int bits);
+int calculateOffset(const char* targetLabel, LabelInfo labels[], int labelCount, int currentLine);
+void intToBinary(int value, char *binaryOut, int size);
 
 #include "utilities.h"
 #include "validations.h"
@@ -202,13 +204,18 @@ int main()
     int labelCount = 0;
 
     LabelInfo labelInfos[MAX_LABELS];
-    int lineNum = 0;
     LabelInfo dummyLabels[1];
     char label[MAX_LABEL_LEN];
     int labelLines[MAX_LABELS];
+    int labelAddresses[MAX_LABELS];
+    int lineNum = 0;
     int dummyLabelCount = 0;
+    int currentAddress = 0;
     bool isLabel;
-
+    bool startAddressSet = false;
+    bool isDirectiveThatConsumesSpace = false;
+    int blockSize = 0;
+    
     while (fgets(line, sizeof(line), file)) 
     {
         // Ignore lines that are empty or start with a comment
@@ -220,8 +227,38 @@ int main()
 
         char* token = strtok(line, " \t\n");
         bool isLabelLine = false;
+        int minIndex = 0;
 
-        // Check if the first token is a potential label
+        if (token && strcmp(token, ".ORIG") == 0)
+        {
+            token = strtok(NULL, " \t\n");
+            if (token)
+            {
+                sscanf(token, "x%X", &currentAddress);
+                printf("Starting Address: x%X\n", currentAddress);
+                startAddressSet = true;
+            }
+        }
+        else if (strcmp(token, ".FILL") == 0)
+        {
+            currentAddress += 2;
+            isDirectiveThatConsumesSpace = true;
+        }
+        else if (strcmp(token, ".BLKW") == 0)
+        {
+            int blockSize = 0;
+            if (parseBLKW(line, &minIndex, &blockSize))
+            {
+                printf("Valid .BLKW directive with block size: %d.\n", blockSize);
+                currentAddress += 2 * blockSize;
+                isDirectiveThatConsumesSpace = true;
+            }
+        }
+        else if (!isLabelLine) 
+        {
+            currentAddress += 2;
+        }
+
         if (token && validateToken(token) == INVALID_TOKEN) 
         {
             // Check the next token to ensure this isn't just an unknown instruction
@@ -239,13 +276,27 @@ int main()
         // If we found a label, store it with its line number
         if (isLabelLine) 
         {
+            size_t tokenLen = strlen(token);
+            if (token[tokenLen - 1] == ':') 
+            {
+                token[tokenLen - 1] = '\0';
+            }
             strncpy(labels[labelCount], token, MAX_LABEL_LEN - 1);
             labels[labelCount][MAX_LABEL_LEN - 1] = '\0'; // Ensure null-termination
             labelLines[labelCount] = lineNum;
+            labelAddresses[labelCount] = currentAddress;
             labelCount++;
         }
 
         lineNum++;
+        isDirectiveThatConsumesSpace = false;
+    }
+
+    for (int i = 0; i < labelCount; i++) 
+    {
+        strcpy(labelInfos[i].label, labels[i]);
+        labelInfos[i].lineNum = labelLines[i] + 1;
+        labelInfos[i].address = labelAddresses[i];
     }
 
     printf("Total Labels: %d\n", labelCount);
@@ -253,8 +304,16 @@ int main()
     {
         printf("Label: %s, Line Number: %d\n", labels[i], labelLines[i] + 1);
     }
-    
+    printf("\n");
+
+    for (int i = 0; i < labelCount; i++) 
+    {
+        printf("Label: %s, Line Number: %d, Address: x%X\n", labelInfos[i].label, labelInfos[i].lineNum, labelInfos[i].address);
+    }
+
     rewind(file);
+    lineNum = 0;
+    currentAddress = 0x3000;
 
     while (fgets(line, sizeof(line), file)) 
     {
@@ -300,7 +359,6 @@ int main()
                         char binaryAddress[17]; // 16 bits + null terminator
                         hexToBinary(address, binaryAddress, 16);
 
-                        // Write ".ORIG" and binary address to output.bin
                         fprintf(binFile, ".ORIG %s\n", binaryAddress);
                     } 
                     else 
@@ -372,58 +430,56 @@ int main()
                 tokenBuffer[tokenIndex] = '\0';
                 tokenIndex = 0;
 
-                // if (strncmp(tokenBuffer, "BR", 2) == 0 && strlen(tokenBuffer) > 2) 
-                // {
-                //     // Prepare a buffer to hold the label part after "BR" instruction, excluding comments
-                //     char labelPart[256] = {0}; // Initialize the buffer to store the label
+                if (strncmp(tokenBuffer, "BR", 2) == 0) 
+                {
+                    char conditionCodes[4] = {0};
+                    strncpy(conditionCodes, tokenBuffer + 2, 3); // Extract condition codes (n, z, p)
+                    
+                    // Consume whitespace and extract the label
+                    while (isspace(peek(0, line, &minIndex))) consume(line, &minIndex);
 
-                //     // Extract the label part from the rest of the line, ignoring comments
-                //     char *commentStart = strchr(line + minIndex, ';'); // Find the start of a comment
-                //     if (commentStart != NULL) 
-                //     {
-                //         *commentStart = '\0'; // Terminate the line at the start of the comment to exclude it
-                //     }
+                    char label[256];
+                    int labelIndex = 0;
+                    while (!isspace(peek(0, line, &minIndex)) && peek(0, line, &minIndex) != '\0') 
+                    {
+                        label[labelIndex++] = consume(line, &minIndex);
+                    }
+                    label[labelIndex] = '\0';
 
-                //     // Copy the label part, excluding any leading whitespace
-                //     sscanf(line + minIndex, "%s", labelPart); // This will skip leading whitespace and stop at the first whitespace after the label
+                    if (isValidLabel(label, labels, labelCount)) 
+                    {
+                        char conditionBinary[4] = {'0', '0', '0', '\0'};
+                        if (strchr(conditionCodes, 'n')) conditionBinary[0] = '1';
+                        if (strchr(conditionCodes, 'z')) conditionBinary[1] = '1';
+                        if (strchr(conditionCodes, 'p')) conditionBinary[2] = '1';
 
-                //     // Validate the extracted label part
-                //     if (isValidLabel(labelPart, labels, labelCount)) 
-                //     {
-                //         printf("Valid BR instruction with label: %s\n", labelPart);
-                //     } 
-                //     else 
-                //     {
-                //         printf("Invalid BR instruction or label not found: %s\n", labelPart);
-                //     }
-                // }
-                if (strncmp(tokenBuffer, "BR", 2) == 0) {
-                    // Extract condition codes and label from the rest of the line
-                    char conditionCodes[4] = {0}; // Assuming up to 3 condition codes
-                    strncpy(conditionCodes, tokenBuffer + 2, 3); // Copy any condition codes
+                        int offset = calculateOffset(label, labelInfos, labelCount, currentAddress + 4);
+                        if (offset == INT_MIN) 
+                        {
+                            printf("Error: Label '%s' not found.\n", label);
+                        } 
+                        else 
+                        {
+                            printf("Offset: %d\n", offset);
 
-                    // Assuming label starts immediately after condition codes with no extra spaces
-                    char *labelStart = line + minIndex; // Start of the label in the line buffer
+                            char offsetBinary[10];
+                            intToBinary(offset, offsetBinary, 9); // Convert offset to binary
 
-                    // Trim leading spaces before label if needed
-                    while (*labelStart && isspace(*labelStart)) labelStart++;
+                            char binaryInstruction[17];
+                            snprintf(binaryInstruction, sizeof(binaryInstruction), "0000%s%s", conditionBinary, offsetBinary);
 
-                    // Ensure label termination at the first space or end of string
-                    char *endOfLabel = strpbrk(labelStart, " \t\n\r;");
-                    if (endOfLabel) *endOfLabel = '\0';
+                            printf("BR instruction binary: %s\n", binaryInstruction);
 
-                    // Now labelStart points to the start of the label.
-                    if (isValidLabel(labelStart, labels, labelCount)) {
-                        printf("Valid BR instruction with label: %s\n", labelStart);
-                        char operandsBuffer[260]; // Enough space for conditions and label.
-                        sprintf(operandsBuffer, "%s %s", conditionCodes, labelStart); // Prepare operand string.
-                        
-                        char binaryOut[17]; // Buffer for binary output.
-                        processOperands(operandsBuffer, binaryOut, BR, labelInfos, labelCount, lineNum);
-                        
-                        writeLineToBin("0000", binaryOut, "", binFile); // Write to binary file.
-                    } else {
-                        printf("Invalid BR instruction or label not found: %s\n", labelStart);
+                            BinOps binaryBr = tokenToBinaryOp(BR, conditionCodes);
+                            const char *opcode = getOpcodeForToken(binaryBr);
+                            const char *comment = getCommentForInstruction(binaryBr);
+
+                            writeLineToBin("", binaryInstruction, comment, binFile);
+                        }
+                    } 
+                    else 
+                    {
+                        printf("Invalid BR instruction or label not found: %s\n", label);
                     }
                 }
                 else 
@@ -486,25 +542,6 @@ int main()
                             printf("Comment for AND: %s\n", comment);
 
                             writeLineToBin(opcode, binaryOut, comment, binFile);
-                        }
-                    }
-                    else if (tokenType == BR)
-                    {
-                        char fullBRInstruction[256];
-                        snprintf(fullBRInstruction, sizeof(fullBRInstruction), "%s%s", tokenBuffer, line + minIndex);
-
-                        char remainingInstruction[256]; // Buffer to hold just the label after parsing
-
-                        if (!parseBR(fullBRInstruction, labels, labelCount, remainingInstruction)) 
-                        {
-                            printf("Invalid BR instruction or label not found.\n");
-                        } 
-                        else 
-                        {
-                            printf("\nBR instruction with valid label: %s\n", remainingInstruction);
-                            BinOps binaryBr = tokenToBinaryOp(BR, remainingInstruction); 
-                            const char *opcode = getOpcodeForToken(binaryBr);
-                            printf("Opcode for BR: %s\n", opcode);
                         }
                     }
                     else if (tokenType == LD)
@@ -678,6 +715,12 @@ int main()
                 }
             }
         }
+
+        if (tokenType != INVALID_TOKEN && tokenType != LABEL) 
+        {
+            currentAddress += 2;
+        }
+
         lineNum++;
     }
 
