@@ -1,10 +1,15 @@
 .ORIG 0011000000000000
+0010001000010001 ; LD statement responsible for loading some defined LABEL into some DR
 0101011011100000 ; AND statement responsible for anding some SR1 and Imm5, and placing the result in some DR.
 0001010001111111 ; ADD statement responsible for adding some SR1 and Imm5, and placing the result in some DR.
 0110100100000101 ; LDR statement responsible for loading some SR1 into DR, with some offset6
 1001011100111111 ; NOT statement responsible for notting some defined SR1 and placing the result in some DR
 0111010010000110 ; STR statement responsible for storing some defined SR2 into some defined SR1, with some offset6
+1110000000001100 ; LEA statement responsible for loading the effective address of some defined LABEL into some DR
 0111000001000000 ; STR statement responsible for storing some defined SR2 into some defined SR1, with some offset6
+1010010000001011 ; LDI statement responsible for loading some defined LABEL indirectly into some DR
+1011010000001011 ; STI statement responsible for storing some defined LABEL indirectly into some defined SR1
+0011011000001011 ; ST statement responsible for storing some defined LABEL into some defined SR1
 0001011011000001 ; ADD statement responsible for adding some SR1 and SR2, and placing the result in some DR.
 0001010010111111 ; ADD statement responsible for adding some SR1 and Imm5, and placing the result in some DR.
 0000001111111100 ; BR statement responsible for branching on some condition (n/z/p) to some defined LABEL

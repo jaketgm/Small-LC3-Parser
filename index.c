@@ -150,13 +150,13 @@ bool parseADD(char *source, int *minIndex, char *operandsOut);
 bool parseAND(char *source, int *minIndex, char *operandsOut);
 bool parseBR(const char *instruction, char labels[][MAX_LABEL_LEN], int labelCount, char *labelOut);
 bool isBRInstruction(char *token);
-bool parseLD(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount);
-bool parseLDI(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount);
+bool parseLD(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount, char *dr, char *targetLabel);
+bool parseLDI(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount, char *dr, char *targetLabel);
 bool parseLDR(char *source, int *minIndex, char *operandsBuffer);
-bool parseLEA(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount);
+bool parseLEA(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount, char *dr, char *targetLabel);
 bool parseNOT(char *source, int *minIndex, char *operandsOut);
-bool parseST(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount);
-bool parseSTI(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount);
+bool parseST(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount, char *sr, char *targetLabel);
+bool parseSTI(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount, char *sr, char *targetLabel);
 bool parseSTR(char *source, int *minIndex, char *operandsOut);
 bool parseTRAP(char *source, int *minIndex, int *trapVector);
 bool parseSEMI(char *source, int *minIndex);
@@ -544,34 +544,80 @@ int main()
                             writeLineToBin(opcode, binaryOut, comment, binFile);
                         }
                     }
-                    else if (tokenType == LD)
+                    else if (tokenType == LD) 
                     {
-                        char operandsBuffer[256];
-                        if (!parseLD(line, &minIndex, labels, labelCount))
+                        char drStr[256]; 
+                        char label[256]; 
+                        if (!parseLD(line, &minIndex, labels, labelCount, drStr, label)) 
                         {
                             printf("Invalid operands for LD instruction.\n");
-                        }
+                        } 
                         else 
                         {
                             printf("\nValid operands for LD instruction.\n");
-                            BinOps binaryLd = tokenToBinaryOp(LD, operandsBuffer);
+
+                            RegisterTokens drToken = validateRegisterToken(drStr); 
+                            const char *drBinary = getBinValForRegister(drToken);
+
+                            if (drBinary == NULL) 
+                            {
+                                printf("Error: Invalid DR register '%s'.\n", drStr);
+                                exit(EXIT_FAILURE);
+                            }
+
+                            int offset = calculateOffset(label, labelInfos, labelCount, currentAddress);
+                            char offsetBinary[10]; 
+                            intToBinary(offset, offsetBinary, 9); 
+
+                            BinOps binaryLd = tokenToBinaryOp(LD, label); 
                             const char *opcode = getOpcodeForToken(binaryLd);
-                            printf("Opcode for LD: %s\n", opcode);
+
+                            char binaryInstruction[17]; 
+                            snprintf(binaryInstruction, sizeof(binaryInstruction), "%s%s%s", opcode, drBinary, offsetBinary);
+
+                            const char *comment = getCommentForInstruction(binaryLd); 
+
+                            writeLineToBin("", binaryInstruction, comment, binFile);
+
+                            printf("LD instruction binary: %s\n", binaryInstruction);
                         }
                     }
                     else if (tokenType == LDI)
                     {
-                        char operandsBuffer[256];
-                        if (!parseLDI(line, &minIndex, labels, labelCount))
+                        char drStr[256];
+                        char label[256];
+                        if (!parseLDI(line, &minIndex, labels, labelCount, drStr, label))
                         {
                             printf("Invalid operands for LDI instruction.\n");
                         }
                         else 
                         {
                             printf("\nValid operands for LDI instruction.\n");
-                            BinOps binaryLdi = tokenToBinaryOp(LDI, operandsBuffer);
+
+                            RegisterTokens drToken = validateRegisterToken(drStr);
+                            const char *drBinary = getBinValForRegister(drToken);
+
+                            if (drBinary == NULL) 
+                            {
+                                printf("Error: Invalid DR register '%s'.\n", drStr);
+                                exit(EXIT_FAILURE);
+                            }
+
+                            int offset = calculateOffset(label, labelInfos, labelCount, currentAddress);
+                            char offsetBinary[10]; 
+                            intToBinary(offset, offsetBinary, 9);
+
+                            BinOps binaryLdi = tokenToBinaryOp(LDI, label);
                             const char *opcode = getOpcodeForToken(binaryLdi);
-                            printf("Opcode for LDI: %s\n", opcode);
+
+                            char binaryInstruction[17];
+                            snprintf(binaryInstruction, sizeof(binaryInstruction), "%s%s%s", opcode, drBinary, offsetBinary);
+
+                            const char *comment = getCommentForInstruction(binaryLdi);
+
+                            writeLineToBin("", binaryInstruction, comment, binFile);
+
+                            printf("LDI instruction binary: %s\n", binaryInstruction);
                         }
                     }
                     else if (tokenType == LDR)
@@ -597,19 +643,42 @@ int main()
                             writeLineToBin(opcode, binaryOut, comment, binFile);
                         }
                     }
-                    else if (tokenType == LEA)
+                    else if (tokenType == LEA) 
                     {
-                        char operandsBuffer[256];
-                        if (!parseLEA(line, &minIndex, labels, labelCount))
+                        char drStr[256];  
+                        char label[256]; 
+                        if (!parseLEA(line, &minIndex, labels, labelCount, drStr, label)) 
                         {
                             printf("Invalid operands for LEA instruction.\n");
-                        }
+                        } 
                         else 
                         {
                             printf("\nValid operands for LEA instruction.\n");
-                            BinOps binaryLea = tokenToBinaryOp(LEA, operandsBuffer);
-                            const char *opcode = getOpcodeForToken(binaryLea);
-                            printf("Opcode for LEA: %s\n", opcode);
+
+                            RegisterTokens drToken = validateRegisterToken(drStr); 
+                            const char *drBinary = getBinValForRegister(drToken); 
+
+                            if (drBinary == NULL) 
+                            {
+                                printf("Error: Invalid DR register '%s'.\n", drStr);
+                                exit(EXIT_FAILURE);
+                            }
+
+                            int offset = calculateOffset(label, labelInfos, labelCount, currentAddress);
+                            char offsetBinary[10]; 
+                            intToBinary(offset, offsetBinary, 9); 
+
+                            BinOps binaryLea = tokenToBinaryOp(LEA, label); 
+                            const char *opcode = getOpcodeForToken(binaryLea); 
+
+                            char binaryInstruction[17]; 
+                            snprintf(binaryInstruction, sizeof(binaryInstruction), "%s%s%s", opcode, drBinary, offsetBinary);
+
+                            const char *comment = getCommentForInstruction(binaryLea); 
+
+                            writeLineToBin("", binaryInstruction, comment, binFile);
+
+                            printf("LEA instruction binary: %s\n", binaryInstruction);
                         }
                     }
                     else if (tokenType == NOT) 
@@ -635,34 +704,68 @@ int main()
                             writeLineToBin(opcode, binaryOut, comment, binFile);
                         }
                     }
-                    else if (tokenType == ST)
+                    else if (tokenType == ST) 
                     {
-                        char operandsBuffer[256];
-                        if (!parseST(line, &minIndex, labels, labelCount))
+                        char srStr[256]; 
+                        char label[256]; 
+                        if (!parseST(line, &minIndex, labels, labelCount, srStr, label)) 
                         {
                             printf("Invalid operands for ST instruction.\n");
-                        }
+                        } 
                         else 
                         {
                             printf("\nValid operands for ST instruction.\n");
-                            BinOps binarySt = tokenToBinaryOp(ST, operandsBuffer);
-                            const char *opcode = getOpcodeForToken(binarySt);
-                            printf("Opcode for ST: %s\n", opcode);
+
+                            RegisterTokens srToken = validateRegisterToken(srStr); 
+                            const char *srBinary = getBinValForRegister(srToken); 
+
+                            int offset = calculateOffset(label, labelInfos, labelCount, currentAddress);
+                            char offsetBinary[10]; 
+                            intToBinary(offset, offsetBinary, 9); 
+
+                            BinOps binarySt = tokenToBinaryOp(ST, label); 
+                            const char *opcode = getOpcodeForToken(binarySt); 
+
+                            char binaryInstruction[17]; 
+                            snprintf(binaryInstruction, sizeof(binaryInstruction), "%s%s%s", opcode, srBinary, offsetBinary);
+
+                            const char *comment = getCommentForInstruction(binarySt); 
+
+                            writeLineToBin("", binaryInstruction, comment, binFile);
+
+                            printf("ST instruction binary: %s\n", binaryInstruction);
                         }
                     }
-                    else if (tokenType == STI)
+                    else if (tokenType == STI) 
                     {
-                        char operandsBuffer[256];
-                        if (!parseST(line, &minIndex, labels, labelCount))
+                        char srStr[256]; 
+                        char label[256];
+                        if (!parseSTI(line, &minIndex, labels, labelCount, srStr, label)) 
                         {
                             printf("Invalid operands for STI instruction.\n");
-                        }
+                        } 
                         else 
                         {
                             printf("\nValid operands for STI instruction.\n");
-                            BinOps binarySti = tokenToBinaryOp(STI, operandsBuffer);
-                            const char *opcode = getOpcodeForToken(binarySti);
-                            printf("Opcode for STI: %s\n", opcode);
+
+                            RegisterTokens srToken = validateRegisterToken(srStr); 
+                            const char *srBinary = getBinValForRegister(srToken); 
+
+                            int offset = calculateOffset(label, labelInfos, labelCount, currentAddress);
+                            char offsetBinary[10]; 
+                            intToBinary(offset, offsetBinary, 9); 
+
+                            BinOps binarySti = tokenToBinaryOp(STI, label); 
+                            const char *opcode = getOpcodeForToken(binarySti); 
+
+                            char binaryInstruction[17]; 
+                            snprintf(binaryInstruction, sizeof(binaryInstruction), "%s%s%s", opcode, srBinary, offsetBinary);
+
+                            const char *comment = getCommentForInstruction(binarySti); 
+
+                            writeLineToBin("", binaryInstruction, comment, binFile);
+
+                            printf("STI instruction binary: %s\n", binaryInstruction);
                         }
                     }
                     else if (tokenType == STR)

@@ -220,7 +220,7 @@ bool parseBR(const char *instruction, char labels[][MAX_LABEL_LEN], int labelCou
     else
         Invalid
 */
-bool parseLD(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount) 
+bool parseLD(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount, char *dr, char *targetLabel) 
 {
     // Skip whitespace before DR
     while (isspace(peek(0, source, minIndex))) 
@@ -228,20 +228,20 @@ bool parseLD(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labe
         consume(source, minIndex);
     }
 
+    // Parse DR
     char tokenBuffer[256];
     int tokenIndex = 0;
-    // Parse DR
     while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != ',' && peek(0, source, minIndex) != '\0') 
     {
-        tokenBuffer[tokenIndex] = consume(source, minIndex);
-        tokenIndex++;
+        tokenBuffer[tokenIndex++] = consume(source, minIndex);
     }
-    tokenBuffer[tokenIndex] = '\0'; 
+    tokenBuffer[tokenIndex] = '\0';
 
     if (!isRegister(tokenBuffer)) 
     {
         return false;
     }
+    strcpy(dr, tokenBuffer); // Copy the DR register to output parameter
 
     // Skip whitespace (and comma if present) before the label
     while (isspace(peek(0, source, minIndex)) || peek(0, source, minIndex) == ',') 
@@ -254,13 +254,16 @@ bool parseLD(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labe
     // Parse LABEL
     while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != '\0') 
     {
-        tokenBuffer[tokenIndex] = consume(source, minIndex);
-        tokenIndex++;
+        tokenBuffer[tokenIndex++] = consume(source, minIndex);
     }
     tokenBuffer[tokenIndex] = '\0';
 
-    // Check if label is valid
-    return isValidLabel(tokenBuffer, labels, labelCount);
+    if (!isValidLabel(tokenBuffer, labels, labelCount)) {
+        return false;
+    }
+    strcpy(targetLabel, tokenBuffer); // Copy the target label to output parameter
+
+    return true;
 }
 
 /* 
@@ -272,7 +275,7 @@ bool parseLD(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labe
     else
         Invalid
 */
-bool parseLDI(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount) 
+bool parseLDI(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount, char *dr, char *targetLabel) 
 {
     // Skip any whitespace after the "LDI" instruction
     while (isspace(peek(0, source, minIndex))) 
@@ -289,12 +292,12 @@ bool parseLDI(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int lab
     }
     registerBuffer[registerIndex] = '\0'; // Null-terminate the register part
 
-    // Check if the first operand (DR) is a valid register
     if (!isRegister(registerBuffer)) 
     {
         printf("Register not valid: %s\n", registerBuffer);
         return false;
     }
+    strcpy(dr, registerBuffer); // Copy the DR register to the output parameter
 
     // Skip the comma and any whitespace before the label
     if (peek(0, source, minIndex) == ',') 
@@ -315,19 +318,14 @@ bool parseLDI(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int lab
     }
     labelBuffer[labelIndex] = '\0'; // Null-terminate the label
 
-    // Validate the extracted label
-    if (isValidLabel(labelBuffer, labels, labelCount)) 
+    if (!isValidLabel(labelBuffer, labels, labelCount)) 
     {
-        // Successfully parsed and validated the label
-        printf("Valid label for LDI: %s\n", labelBuffer);
-        return true;
-    } 
-    else 
-    {
-        // Label validation failed
         printf("Label not valid or not found for LDI: %s\n", labelBuffer);
         return false;
     }
+    strcpy(targetLabel, labelBuffer); // Copy the target label to the output parameter
+
+    return true;
 }
 
 /* 
@@ -408,14 +406,14 @@ bool parseLDR(char *source, int *minIndex, char *operandsBuffer)
     else
         Invalid
 */
-bool parseLEA(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount) 
+bool parseLEA(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount, char *dr, char *targetLabel) 
 {
     while (isspace(peek(0, source, minIndex))) 
     {
         consume(source, minIndex);
     }
 
-    // DR part
+    // Parse and validate the destination register (DR)
     char registerBuffer[256];
     int registerIndex = 0;
     while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != ',' && peek(0, source, minIndex) != '\0') 
@@ -424,25 +422,24 @@ bool parseLEA(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int lab
     }
     registerBuffer[registerIndex] = '\0'; // Null-terminate the register part
 
-    // Check if the first operand (DR) is a valid register
     if (!isRegister(registerBuffer)) 
     {
+        printf("Invalid register for LEA: %s\n", registerBuffer);
         return false;
     }
+    strcpy(dr, registerBuffer); // Copy the DR register to output parameter
 
-    // Skip the comma after the DR part
+    // Skip the comma and whitespace before the label
     if (peek(0, source, minIndex) == ',') 
     {
         consume(source, minIndex); // Consume the comma
     }
-
-    // Skip any whitespace before the label
     while (isspace(peek(0, source, minIndex))) 
     {
         consume(source, minIndex);
     }
 
-    // Label part
+    // Parse and validate the label
     char labelBuffer[256];
     int labelIndex = 0;
     while (peek(0, source, minIndex) != '\0' && peek(0, source, minIndex) != ';' && !isspace(peek(0, source, minIndex))) 
@@ -451,8 +448,13 @@ bool parseLEA(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int lab
     }
     labelBuffer[labelIndex] = '\0'; // Null-terminate the label part
 
-    // Validate the extracted label
-    return isValidLabel(labelBuffer, labels, labelCount);
+    if (!isValidLabel(labelBuffer, labels, labelCount)) {
+        printf("Invalid label for LEA: %s\n", labelBuffer);
+        return false;
+    }
+    strcpy(targetLabel, labelBuffer); // Copy the target label to output parameter
+
+    return true;
 }
 
 /* 
@@ -524,8 +526,9 @@ bool parseNOT(char *source, int *minIndex, char *operandsOut)
     else
         Invalid
 */
-bool parseST(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount) 
+bool parseST(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount, char *sr, char *targetLabel) 
 {
+    // Skip whitespace before SR
     while (isspace(peek(0, source, minIndex))) 
     {
         consume(source, minIndex);
@@ -533,45 +536,47 @@ bool parseST(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labe
 
     // SR part
     char registerBuffer[256];
-    int registerIndex = -1;
+    int registerIndex = 0; 
     while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != ',' && peek(0, source, minIndex) != '\0') 
     {
-        registerBuffer[++registerIndex] = consume(source, minIndex);
+        registerBuffer[registerIndex++] = consume(source, minIndex);
     }
-    registerBuffer[registerIndex + 1] = '\0'; // Null-terminate the register part
+    registerBuffer[registerIndex] = '\0'; // Null-terminate the register part
 
-    // Check if the first operand (SR) is a valid register
     if (!isRegister(registerBuffer)) 
     {
+        printf("Register not valid: %s\n", registerBuffer);
         return false;
     }
+    strcpy(sr, registerBuffer); // Copy the SR register to output parameter
 
-    // Skip over the comma (if present) and any whitespace after the register
+    // Skip the comma and whitespace before the label
     if (peek(0, source, minIndex) == ',') 
     {
-        consume(source, minIndex); // Skip the comma
+        consume(source, minIndex); // Consume the comma
     }
     while (isspace(peek(0, source, minIndex))) 
     {
-        consume(source, minIndex); // Skip any whitespace
+        consume(source, minIndex);
     }
 
     // Label part
     char labelBuffer[256];
-    int labelIndex = -1;
-    while (peek(0, source, minIndex) != '\0' && peek(0, source, minIndex) != ';') 
+    int labelIndex = 0; 
+    while (peek(0, source, minIndex) != '\0' && peek(0, source, minIndex) != ';' && !isspace(peek(0, source, minIndex))) 
     {
-        if (isspace(peek(0, source, minIndex))) 
-        {
-            // Stop at the first whitespace after the label
-            break;
-        }
-        labelBuffer[++labelIndex] = consume(source, minIndex); // Pre-increment index
+        labelBuffer[labelIndex++] = consume(source, minIndex);
     }
-    labelBuffer[labelIndex + 1] = '\0'; // Null-terminate the label part
+    labelBuffer[labelIndex] = '\0'; // Null-terminate the label part
 
-    // Validate the extracted label
-    return isValidLabel(labelBuffer, labels, labelCount);
+    if (!isValidLabel(labelBuffer, labels, labelCount)) 
+    {
+        printf("Label not valid or not found for ST: %s\n", labelBuffer);
+        return false;
+    }
+    strcpy(targetLabel, labelBuffer); // Copy the target label to output parameter
+
+    return true;
 }
 
 /* 
@@ -583,48 +588,56 @@ bool parseST(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labe
     else
         Invalid
 */
-bool parseSTI(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount)
+bool parseSTI(char *source, int *minIndex, char labels[][MAX_LABEL_LEN], int labelCount, char *sr, char *targetLabel) 
 {
-    while (isspace(peek(0, source, minIndex)))
+    while (isspace(peek(0, source, minIndex))) 
     {
         consume(source, minIndex);
     }
 
-    char tokenBuffer[256];
-    int tokenIndex = 0;
-    while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != ',' && peek(0, source, minIndex) != '\0')
+    // SR part
+    char registerBuffer[256];
+    int registerIndex = 0;
+    while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != ',' && peek(0, source, minIndex) != '\0') 
     {
-        tokenIndex++;
-        tokenBuffer[tokenIndex] = consume(source, minIndex);
+        registerBuffer[registerIndex++] = consume(source, minIndex);
     }
-    tokenBuffer[tokenIndex] = '\0';
+    registerBuffer[registerIndex] = '\0';
 
-    if (!isRegister(tokenBuffer))
+    if (!isRegister(registerBuffer)) 
     {
+        printf("Invalid register for STI: %s\n", registerBuffer);
         return false;
     }
+    strcpy(sr, registerBuffer); // Copy the SR register to output parameter
 
-    while (isspace(peek(0, source, minIndex)))
+    // Skip over the comma (if present) and whitespace after the register
+    if (peek(0, source, minIndex) == ',') 
+    {
+        consume(source, minIndex);
+    }
+    while (isspace(peek(0, source, minIndex))) 
     {
         consume(source, minIndex);
     }
 
-    tokenIndex = 0;
-    while (!isspace(peek(0, source, minIndex)) && peek(0, source, minIndex) != '\0')
+    // Label part
+    char labelBuffer[256];
+    int labelIndex = 0;
+    while (peek(0, source, minIndex) != '\0' && peek(0, source, minIndex) != ';' && !isspace(peek(0, source, minIndex))) 
     {
-        tokenIndex++;
-        tokenBuffer[tokenIndex] = consume(source, minIndex);
+        labelBuffer[labelIndex++] = consume(source, minIndex);
     }
-    tokenBuffer[tokenIndex] = '\0';
+    labelBuffer[labelIndex] = '\0';
 
-    if (isValidLabel(tokenBuffer, labels, labelCount))
+    if (!isValidLabel(labelBuffer, labels, labelCount)) 
     {
-        return true;
-    }
-    else 
-    {
+        printf("Invalid label for STI: %s\n", labelBuffer);
         return false;
     }
+    strcpy(targetLabel, labelBuffer); // Copy the target label to output parameter
+
+    return true;
 }
 
 /* 
